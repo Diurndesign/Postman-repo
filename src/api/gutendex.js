@@ -164,9 +164,23 @@ async function fetchJson(url, signal) {
   return r.json();
 }
 
+// Clé de déduplication : même œuvre = même (titre + auteur) normalisés.
+function cleOeuvre(livre) {
+  const sansAccents = /[̀-ͯ]/g; // marques diacritiques combinantes
+  const norm = (s) =>
+    (s || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(sansAccents, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  return norm(livre.titre) + "|" + norm(livre.auteur);
+}
+
 // Une page de résultats FR, normalisée et filtrée.
+// copyright=false : on ne garde que le vrai domaine public.
 export async function listerPageFr(page = 1, signal) {
-  const url = `${BASE}?languages=fr&page=${page}`;
+  const url = `${BASE}?languages=fr&copyright=false&page=${page}`;
   const data = await fetchJson(url, signal);
   const brut = Array.isArray(data.results) ? data.results : [];
   const livres = brut
@@ -183,7 +197,7 @@ export async function piocherPoolFr({ pages = 2, signal } = {}) {
   const premiere = await listerPageFr(1, signal);
   const total = Math.max(1, Math.ceil((premiere.count || PAR_PAGE) / PAR_PAGE));
 
-  const pool = [...premiere.livres];
+  const brut = [...premiere.livres];
   const dejaVues = new Set([1]);
   for (let i = 0; i < pages; i++) {
     const p = 1 + Math.floor(Math.random() * total);
@@ -191,10 +205,21 @@ export async function piocherPoolFr({ pages = 2, signal } = {}) {
     dejaVues.add(p);
     try {
       const page = await listerPageFr(p, signal);
-      pool.push(...page.livres);
+      brut.push(...page.livres);
     } catch (e) {
       /* on ignore une page qui échoue */
     }
+  }
+
+  // Déduplication : une même œuvre (plusieurs éditions Gutenberg) ne doit
+  // pas pouvoir apparaître deux fois dans le duel.
+  const vues = new Set();
+  const pool = [];
+  for (const livre of brut) {
+    const cle = cleOeuvre(livre);
+    if (vues.has(cle)) continue;
+    vues.add(cle);
+    pool.push(livre);
   }
   return pool;
 }
@@ -204,7 +229,9 @@ export async function piocherPoolFr({ pages = 2, signal } = {}) {
 export async function resoudreEpub({ titre, auteur }) {
   try {
     const requete = encodeURIComponent(titre + " " + auteur);
-    const reponse = await fetch(`${BASE}?languages=fr&search=` + requete);
+    const reponse = await fetch(
+      `${BASE}?languages=fr&copyright=false&search=` + requete
+    );
     if (!reponse.ok) return null;
     const data = await reponse.json();
     const resultats = Array.isArray(data.results) ? data.results : [];

@@ -1,7 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { LIVRES } from "./data/livres.js";
 import { piocherPoolFr } from "./api/gutendex.js";
-import Reader from "./components/Reader.jsx";
+
+// Chargé à la demande : epub.js + jszip (~500 Ko) ne pèsent plus sur
+// l'écran de découverte, seulement à l'ouverture d'un livre.
+const Reader = lazy(() => import("./components/Reader.jsx"));
 
 /* ------------------------------------------------------------------ */
 /*  Persistance localStorage (toujours protégée par try/catch)         */
@@ -165,7 +168,7 @@ function Carte({ livre, garde, onGarder, onLire }) {
 /* ------------------------------------------------------------------ */
 /*  Carrousel 2 cartes : une à la fois, on balaie pour voir l'autre    */
 /* ------------------------------------------------------------------ */
-function Carrousel({ livres, estGarde, onGarder, onLire }) {
+function Carrousel({ livres, estGarde, onGarder, onLire, actif = true }) {
   const [index, setIndex] = useState(0);
   const [drag, setDrag] = useState(0);
   const [enGlissement, setEnGlissement] = useState(false);
@@ -217,13 +220,17 @@ function Carrousel({ livres, estGarde, onGarder, onLire }) {
   }
 
   useEffect(() => {
+    if (!actif) return undefined; // inactif si un lecteur/modal est ouvert
     function onTouche(e) {
+      const c = e.target;
+      if (c && (c.tagName === "INPUT" || c.tagName === "TEXTAREA" || c.isContentEditable))
+        return; // ne pas voler les flèches à un champ de saisie
       if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
       else if (e.key === "ArrowRight") setIndex((i) => Math.min(nb - 1, i + 1));
     }
     window.addEventListener("keydown", onTouche);
     return () => window.removeEventListener("keydown", onTouche);
-  }, [nb]);
+  }, [nb, actif]);
 
   const l = largeur();
   const pourcent = -index * 100;
@@ -515,6 +522,7 @@ export default function App() {
                 estGarde={estGarde}
                 onGarder={garder}
                 onLire={setLecture}
+                actif={!lecture && !carnetPour}
               />
             ) : (
               <p className="tr-vide">Aucun duel disponible.</p>
@@ -535,7 +543,20 @@ export default function App() {
         )}
       </main>
 
-      {lecture && <Reader livre={lecture} onFermer={() => setLecture(null)} />}
+      {lecture && (
+        <Suspense
+          fallback={
+            <div className="tr-reader">
+              <div className="tr-reader-overlay">
+                <span className="tr-reader-spin" />
+                <p>Ouverture du lecteur…</p>
+              </div>
+            </div>
+          }
+        >
+          <Reader livre={lecture} onFermer={() => setLecture(null)} />
+        </Suspense>
+      )}
 
       {carnetPour && (
         <div className="tr-modal-fond" onClick={() => setCarnetPour(null)}>
