@@ -222,14 +222,12 @@ export async function resoudreEpub({ titre, auteur }) {
 /*  Adaptation des URLs pour la lecture                                */
 /* ------------------------------------------------------------------ */
 
-// En dev, passe par le proxy Vite (/gutenberg) pour éviter CORS ;
-// en production, renvoie l'URL d'origine.
+// On passe toujours par le proxy /gutenberg pour éviter le CORS :
+// - en dev, c'est le proxy de Vite (vite.config.js),
+// - en production, c'est la réécriture Vercel (vercel.json).
 export function urlLecture(url) {
   if (!url) return url;
-  if (import.meta.env.DEV) {
-    return url.replace(/^https:\/\/(www\.)?gutenberg\.org/, "/gutenberg");
-  }
-  return url;
+  return url.replace(/^https:\/\/(www\.)?gutenberg\.org/, "/gutenberg");
 }
 
 // Récupère l'incipit (première phrase) depuis le texte brut du livre.
