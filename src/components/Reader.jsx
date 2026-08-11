@@ -5,6 +5,24 @@ import {
   urlLecture,
   chargerIncipit,
 } from "../api/gutendex.js";
+import { estNatif, telechargerEpubBuffer } from "../native.js";
+
+// Mémorisation de la position de lecture (CFI epub) par livre.
+const CLE_POS = "tranche.pos.";
+function lirePos(id) {
+  try {
+    return localStorage.getItem(CLE_POS + id) || null;
+  } catch (e) {
+    return null;
+  }
+}
+function ecrirePos(id, cfi) {
+  try {
+    localStorage.setItem(CLE_POS + id, cfi);
+  } catch (e) {
+    /* ignore */
+  }
+}
 
 // Lecteur plein écran. L'URL epub vient directement de la fiche Gutendex
 // (livre.epubUrl) ; pour les 12 livres seed on la résout par recherche.
@@ -26,8 +44,18 @@ export default function Reader({ livre, onFermer }) {
         if (!brut) throw new Error("epub introuvable");
         if (annule) return;
 
-        const url = urlLecture(brut);
-        const book = ePub(url);
+        // Web : on passe par le proxy /gutenberg (CORS).
+        // Natif (Android/iOS) : pas de proxy → on télécharge l'epub en
+        // ArrayBuffer via la couche native et on le lit localement.
+        let source;
+        if (estNatif()) {
+          source = await telechargerEpubBuffer(brut);
+        } else {
+          source = urlLecture(brut);
+        }
+        if (annule) return;
+
+        const book = ePub(source);
         bookRef.current = book;
 
         const rendition = book.renderTo(viewerRef.current, {
@@ -38,8 +66,16 @@ export default function Reader({ livre, onFermer }) {
         });
         renditionRef.current = rendition;
 
-        await rendition.display();
+        // Reprise à la dernière position connue, sinon au début.
+        const pos = lirePos(livre.id);
+        await rendition.display(pos || undefined);
         if (annule) return;
+
+        // Mémorise la position à chaque changement de page.
+        rendition.on("relocated", (loc) => {
+          if (loc && loc.start && loc.start.cfi) ecrirePos(livre.id, loc.start.cfi);
+        });
+
         setEtat("ok");
       } catch (e) {
         if (annule) return;
