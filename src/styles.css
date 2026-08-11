@@ -156,6 +156,31 @@ button {
   border-color: var(--encre);
 }
 
+.tr-note-reseau {
+  text-align: center;
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  color: var(--encre-2);
+  background: rgba(29, 78, 90, 0.08);
+  border: 1px solid var(--trait);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.tr-chargement {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--encre-2);
+  font-size: 14px;
+}
+
 /* ================================================================== */
 /*  Carrousel                                                         */
 /* ================================================================== */

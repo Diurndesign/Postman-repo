@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { LIVRES } from "./data/livres.js";
+import { piocherPoolFr } from "./api/gutendex.js";
 import Reader from "./components/Reader.jsx";
 
 /* ------------------------------------------------------------------ */
@@ -27,7 +28,7 @@ function ecrire(cle, valeur) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Duel du jour : stable par période (jour / semaine / mois)          */
+/*  Duel : stable par période (jour / semaine / mois)                  */
 /* ------------------------------------------------------------------ */
 
 // Clé de période : change à chaque nouvelle journée / semaine / mois.
@@ -40,7 +41,6 @@ function clePeriode(cadence) {
   if (cadence === "mois") return `${an}-${mois}`;
 
   if (cadence === "semaine") {
-    // Numéro de semaine ISO 8601.
     const date = new Date(Date.UTC(an, d.getMonth(), d.getDate()));
     const numJour = date.getUTCDay() || 7;
     date.setUTCDate(date.getUTCDate() + 4 - numJour);
@@ -49,60 +49,58 @@ function clePeriode(cadence) {
     return `${date.getUTCFullYear()}-S${String(semaine).padStart(2, "0")}`;
   }
 
-  return `${an}-${mois}-${jour}`; // par défaut : le jour
+  return `${an}-${mois}-${jour}`;
 }
 
-// Petit hash déterministe : même clé -> même graine -> même duel.
+// Hash déterministe (même clé -> même graine -> même duel).
 function graineDepuis(texte) {
   let h = 0;
-  for (let i = 0; i < texte.length; i++) {
-    h = (h * 31 + texte.charCodeAt(i)) | 0;
-  }
+  for (let i = 0; i < texte.length; i++) h = (h * 31 + texte.charCodeAt(i)) | 0;
   return Math.abs(h);
 }
 
-// Tire DEUX livres, en contrastant les genres si possible. Déterministe.
-function tirerPaire(livres, graine) {
-  const n = livres.length;
+// Tire DEUX livres d'un pool, en contrastant les genres si possible.
+function tirerPaire(pool, graine) {
+  const n = pool.length;
+  if (n === 0) return [];
+  if (n === 1) return [pool[0]];
+
   const i1 = graine % n;
-  const premier = livres[i1];
+  const premier = pool[i1];
 
   let second = null;
   for (let k = 1; k < n; k++) {
     const idx = (i1 + graine + k) % n;
     if (idx === i1) continue;
-    const candidat = livres[idx];
+    const candidat = pool[idx];
     if (candidat.genre !== premier.genre) {
-      second = candidat; // genre différent : idéal
+      second = candidat;
       break;
     }
-    if (!second) second = candidat; // repli : au moins un autre livre
+    if (!second) second = candidat;
   }
-  if (!second) second = livres[(i1 + 1) % n];
+  if (!second) second = pool[(i1 + 1) % n];
 
-  return [premier.id, second.id];
+  return [premier, second];
 }
 
-// Renvoie le duel courant, en le régénérant seulement quand la clé change.
-function duelCourant(cadence) {
-  const cle = clePeriode(cadence);
-  const memo = lire(CLE_DUEL, null);
-  if (
-    memo &&
-    memo.cle === cle &&
-    memo.cadence === cadence &&
-    Array.isArray(memo.ids) &&
-    memo.ids.length === 2
-  ) {
-    return memo.ids;
-  }
-  const ids = tirerPaire(LIVRES, graineDepuis(cadence + ":" + cle));
-  ecrire(CLE_DUEL, { cle, cadence, ids });
-  return ids;
-}
-
-function parId(id) {
-  return LIVRES.find((l) => l.id === id) || null;
+/* ------------------------------------------------------------------ */
+/*  Migration de la bibliothèque (ancien format {id} -> objet complet) */
+/* ------------------------------------------------------------------ */
+function migrerBiblio(brut) {
+  if (!Array.isArray(brut)) return [];
+  return brut
+    .map((e) => {
+      if (e && e.livre) return e; // déjà au bon format
+      if (e && e.id) {
+        const seed = LIVRES.find((l) => l.id === e.id);
+        if (seed) {
+          return { livre: seed, etoiles: e.etoiles || 0, carnet: e.carnet || "" };
+        }
+      }
+      return null;
+    })
+    .filter(Boolean);
 }
 
 /* ------------------------------------------------------------------ */
@@ -117,7 +115,7 @@ function Couverture({ livre }) {
         <span className="tr-couv-trait" />
         <span className="tr-couv-auteur">{livre.auteur}</span>
       </div>
-      <span className="tr-couv-annee">{livre.annee}</span>
+      <span className="tr-couv-annee">{livre.annee || livre.epoque || ""}</span>
     </div>
   );
 }
@@ -126,6 +124,8 @@ function Couverture({ livre }) {
 /*  Carte de découverte                                                */
 /* ------------------------------------------------------------------ */
 function Carte({ livre, garde, onGarder, onLire }) {
+  const dateLabel = livre.annee ? "Année" : "Époque";
+  const dateValeur = livre.annee || livre.epoque || "—";
   return (
     <article className="tr-carte">
       <Couverture livre={livre} />
@@ -136,8 +136,8 @@ function Carte({ livre, garde, onGarder, onLire }) {
             <dd>{livre.auteur}</dd>
           </div>
           <div>
-            <dt className="tr-label">Année</dt>
-            <dd>{livre.annee}</dd>
+            <dt className="tr-label">{dateLabel}</dt>
+            <dd>{dateValeur}</dd>
           </div>
           <div>
             <dt className="tr-label">Genre</dt>
@@ -167,13 +167,12 @@ function Carte({ livre, garde, onGarder, onLire }) {
 /* ------------------------------------------------------------------ */
 function Carrousel({ livres, estGarde, onGarder, onLire }) {
   const [index, setIndex] = useState(0);
-  const [drag, setDrag] = useState(0); // décalage horizontal courant (px)
+  const [drag, setDrag] = useState(0);
   const [enGlissement, setEnGlissement] = useState(false);
-  const depart = useRef(null); // { x, y, axe: null|'x'|'y' }
+  const depart = useRef(null);
   const pisteRef = useRef(null);
   const nb = livres.length;
 
-  // Reste dans les bornes si la paire change.
   useEffect(() => {
     if (index > nb - 1) setIndex(0);
   }, [nb, index]);
@@ -192,15 +191,13 @@ function Carrousel({ livres, estGarde, onGarder, onLire }) {
     const dx = e.clientX - depart.current.x;
     const dy = e.clientY - depart.current.y;
 
-    // Verrouillage d'axe : on décide horizontal ou vertical au premier geste.
     if (!depart.current.axe) {
       if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
       depart.current.axe = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
     }
-    if (depart.current.axe === "y") return; // on laisse le scroll vertical
+    if (depart.current.axe === "y") return;
 
     let delta = dx;
-    // Résistance élastique aux bords (pas de boucle infinie).
     if ((index === 0 && delta > 0) || (index === nb - 1 && delta < 0)) {
       delta *= 0.3;
     }
@@ -219,7 +216,6 @@ function Carrousel({ livres, estGarde, onGarder, onLire }) {
     setEnGlissement(false);
   }
 
-  // Flèches clavier ← →
   useEffect(() => {
     function onTouche(e) {
       if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
@@ -307,10 +303,10 @@ function Bibliotheque({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
   return (
     <div className="tr-grille">
       {entrees.map((entree) => {
-        const livre = parId(entree.id);
+        const livre = entree.livre;
         if (!livre) return null;
         return (
-          <div className="tr-item" key={entree.id}>
+          <div className="tr-item" key={livre.id}>
             <button
               className="tr-item-couv"
               onClick={() => onLire(livre)}
@@ -318,12 +314,12 @@ function Bibliotheque({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
             >
               <Couverture livre={livre} />
             </button>
-            <Etoiles note={entree.etoiles} onNoter={(n) => onNoter(entree.id, n)} />
+            <Etoiles note={entree.etoiles} onNoter={(n) => onNoter(livre.id, n)} />
             {entree.carnet ? (
               <p className="tr-carnet-apercu">« {entree.carnet} »</p>
             ) : null}
             <div className="tr-item-actions">
-              <button className="tr-lien" onClick={() => onCarnet(entree.id)}>
+              <button className="tr-lien" onClick={() => onCarnet(livre.id)}>
                 carnet
               </button>
               <button className="tr-lien" onClick={() => onLire(livre)}>
@@ -331,7 +327,7 @@ function Bibliotheque({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
               </button>
               <button
                 className="tr-lien tr-lien-danger"
-                onClick={() => onRetirer(entree.id)}
+                onClick={() => onRetirer(livre.id)}
               >
                 retirer
               </button>
@@ -347,23 +343,68 @@ function Bibliotheque({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
 /*  Application                                                        */
 /* ------------------------------------------------------------------ */
 export default function App() {
-  const [vue, setVue] = useState("decouverte"); // decouverte | biblio
+  const [vue, setVue] = useState("decouverte");
   const [cadence, setCadence] = useState(() => lire(CLE_CADENCE, "jour"));
-  const [biblio, setBiblio] = useState(() => lire(CLE_BIBLIO, []));
-  const [duel, setDuel] = useState(() => duelCourant(lire(CLE_CADENCE, "jour")));
-  const [lecture, setLecture] = useState(null); // livre en cours de lecture
-  const [carnetPour, setCarnetPour] = useState(null); // id ou null
+  const [biblio, setBiblio] = useState(() => migrerBiblio(lire(CLE_BIBLIO, [])));
+  const [duel, setDuel] = useState([]);
+  const [statut, setStatut] = useState("chargement"); // chargement | ok | hors-ligne
+  const [lecture, setLecture] = useState(null);
+  const [carnetPour, setCarnetPour] = useState(null);
   const [brouillon, setBrouillon] = useState("");
   const [toast, setToast] = useState("");
   const toastRef = useRef(null);
 
-  // Écritures localStorage à chaque changement.
   useEffect(() => ecrire(CLE_BIBLIO, biblio), [biblio]);
   useEffect(() => ecrire(CLE_CADENCE, cadence), [cadence]);
 
-  // Recalcule le duel quand la cadence (ou la période) change.
+  // Duel de la période : réutilisé tant que la clé ne change pas,
+  // sinon on pioche un nouveau pool dans la bibliothèque française.
   useEffect(() => {
-    setDuel(duelCourant(cadence));
+    let annule = false;
+    const ctrl = new AbortController();
+
+    async function majDuel() {
+      const cle = clePeriode(cadence);
+      const memo = lire(CLE_DUEL, null);
+      if (
+        memo &&
+        memo.cle === cle &&
+        memo.cadence === cadence &&
+        Array.isArray(memo.livres) &&
+        memo.livres.length >= 2
+      ) {
+        setDuel(memo.livres);
+        setStatut("ok");
+        return;
+      }
+
+      setStatut("chargement");
+      let pool = [];
+      try {
+        pool = await piocherPoolFr({ pages: 2, signal: ctrl.signal });
+      } catch (e) {
+        pool = [];
+      }
+      if (annule) return;
+
+      let horsLigne = false;
+      if (pool.length < 2) {
+        pool = LIVRES; // repli hors-ligne : catalogue curé
+        horsLigne = true;
+      }
+
+      const paire = tirerPaire(pool, graineDepuis(cadence + ":" + cle));
+      if (annule) return;
+      ecrire(CLE_DUEL, { cle, cadence, livres: paire });
+      setDuel(paire);
+      setStatut(horsLigne ? "hors-ligne" : "ok");
+    }
+
+    majDuel();
+    return () => {
+      annule = true;
+      ctrl.abort();
+    };
   }, [cadence]);
 
   function afficherToast(message) {
@@ -372,25 +413,27 @@ export default function App() {
     toastRef.current = setTimeout(() => setToast(""), 2200);
   }
 
-  const estGarde = (id) => biblio.some((e) => e.id === id);
+  const estGarde = (id) => biblio.some((e) => e.livre && e.livre.id === id);
 
   function garder(livre) {
     if (estGarde(livre.id)) return;
-    setBiblio((b) => [...b, { id: livre.id, etoiles: 0, carnet: "" }]);
+    setBiblio((b) => [...b, { livre, etoiles: 0, carnet: "" }]);
     afficherToast("Ajouté à la bibliothèque");
   }
 
   function retirer(id) {
-    setBiblio((b) => b.filter((e) => e.id !== id));
+    setBiblio((b) => b.filter((e) => e.livre.id !== id));
     afficherToast("Retiré");
   }
 
   function noter(id, n) {
-    setBiblio((b) => b.map((e) => (e.id === id ? { ...e, etoiles: n } : e)));
+    setBiblio((b) =>
+      b.map((e) => (e.livre.id === id ? { ...e, etoiles: n } : e))
+    );
   }
 
   function ouvrirCarnet(id) {
-    const entree = biblio.find((e) => e.id === id);
+    const entree = biblio.find((e) => e.livre.id === id);
     setBrouillon(entree ? entree.carnet : "");
     setCarnetPour(id);
   }
@@ -398,15 +441,16 @@ export default function App() {
   function enregistrerCarnet() {
     const texte = brouillon.trim();
     setBiblio((b) =>
-      b.map((e) => (e.id === carnetPour ? { ...e, carnet: texte } : e))
+      b.map((e) => (e.livre.id === carnetPour ? { ...e, carnet: texte } : e))
     );
     setCarnetPour(null);
     setBrouillon("");
     afficherToast("Carnet enregistré");
   }
 
-  const livresDuel = duel.map(parId).filter(Boolean);
-  const livreCarnet = carnetPour ? parId(carnetPour) : null;
+  const entreeCarnet = carnetPour
+    ? biblio.find((e) => e.livre.id === carnetPour)
+    : null;
 
   return (
     <div className="tr-root">
@@ -453,9 +497,21 @@ export default function App() {
               ))}
             </div>
 
-            {livresDuel.length === 2 ? (
+            {statut === "hors-ligne" ? (
+              <p className="tr-note-reseau">
+                Hors ligne — sélection de secours. Reconnecte-toi pour découvrir
+                toute la bibliothèque.
+              </p>
+            ) : null}
+
+            {statut === "chargement" && duel.length < 2 ? (
+              <div className="tr-chargement">
+                <span className="tr-reader-spin" />
+                <p>On pioche deux livres…</p>
+              </div>
+            ) : duel.length >= 2 ? (
               <Carrousel
-                livres={livresDuel}
+                livres={duel}
                 estGarde={estGarde}
                 onGarder={garder}
                 onLire={setLecture}
@@ -479,15 +535,13 @@ export default function App() {
         )}
       </main>
 
-      {/* Lecteur plein écran */}
       {lecture && <Reader livre={lecture} onFermer={() => setLecture(null)} />}
 
-      {/* Modal carnet */}
       {carnetPour && (
         <div className="tr-modal-fond" onClick={() => setCarnetPour(null)}>
           <div className="tr-modal" onClick={(e) => e.stopPropagation()}>
             <h3 className="tr-modal-titre">
-              Carnet — {livreCarnet ? livreCarnet.titre : ""}
+              Carnet — {entreeCarnet ? entreeCarnet.livre.titre : ""}
             </h3>
             <p className="tr-modal-aide">Une phrase, une impression.</p>
             <textarea
@@ -510,7 +564,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Toast */}
       {toast ? <div className="tr-toast">{toast}</div> : null}
     </div>
   );

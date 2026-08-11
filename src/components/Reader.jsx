@@ -1,14 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
 import ePub from "epubjs";
-import { resoudreEpub, urlLecture } from "../api/gutendex.js";
+import {
+  resoudreEpub,
+  urlLecture,
+  chargerIncipit,
+} from "../api/gutendex.js";
 
-// Lecteur plein écran. Résout l'epub via Gutendex, le rend avec epub.js,
-// et retombe sur l'incipit en cas d'échec.
+// Lecteur plein écran. L'URL epub vient directement de la fiche Gutendex
+// (livre.epubUrl) ; pour les 12 livres seed on la résout par recherche.
 export default function Reader({ livre, onFermer }) {
   const viewerRef = useRef(null);
   const bookRef = useRef(null);
   const renditionRef = useRef(null);
   const [etat, setEtat] = useState("chargement"); // chargement | ok | erreur
+  const [incipit, setIncipit] = useState(livre.incipit || "");
 
   useEffect(() => {
     let annule = false;
@@ -16,7 +21,8 @@ export default function Reader({ livre, onFermer }) {
     async function charger() {
       setEtat("chargement");
       try {
-        const brut = await resoudreEpub(livre);
+        let brut = livre.epubUrl;
+        if (!brut) brut = await resoudreEpub(livre); // repli pour les seeds
         if (!brut) throw new Error("epub introuvable");
         if (annule) return;
 
@@ -36,13 +42,18 @@ export default function Reader({ livre, onFermer }) {
         if (annule) return;
         setEtat("ok");
       } catch (e) {
+        if (annule) return;
+        // Repli : on tente de récupérer l'incipit si on ne l'a pas déjà.
+        if (!incipit && livre.texteUrl) {
+          const debut = await chargerIncipit(livre.texteUrl);
+          if (!annule && debut) setIncipit(debut);
+        }
         if (!annule) setEtat("erreur");
       }
     }
 
     charger();
 
-    // Nettoyage au démontage : on détruit rendition et livre.
     return () => {
       annule = true;
       try {
@@ -58,6 +69,7 @@ export default function Reader({ livre, onFermer }) {
       renditionRef.current = null;
       bookRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [livre]);
 
   function precedent() {
@@ -81,7 +93,6 @@ export default function Reader({ livre, onFermer }) {
       </header>
 
       <div className="tr-reader-scene">
-        {/* La cible du rendu epub.js. Toujours présente dans le DOM. */}
         <div ref={viewerRef} className="tr-reader-viewer" />
 
         {etat === "chargement" && (
@@ -96,8 +107,16 @@ export default function Reader({ livre, onFermer }) {
             <p className="tr-reader-msg">
               La lecture n'est pas disponible pour le moment.
             </p>
-            <p className="tr-reader-incipit">« {livre.incipit} »</p>
-            <p className="tr-reader-sign">— début de « {livre.titre} »</p>
+            {incipit ? (
+              <>
+                <p className="tr-reader-incipit">« {incipit} »</p>
+                <p className="tr-reader-sign">— début de « {livre.titre} »</p>
+              </>
+            ) : (
+              <p className="tr-reader-sign">
+                {livre.auteur} — {livre.titre}
+              </p>
+            )}
           </div>
         )}
       </div>

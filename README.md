@@ -10,8 +10,16 @@ Vous gardez les livres qui vous intéressent (bibliothèque), vous les notez
 (étoiles) et vous écrivez un « carnet » (une phrase, une impression). La lecture
 se fait directement dans l'application grâce à [epub.js](https://github.com/futurepress/epub.js/).
 
-Le catalogue est **curé à la main** ; l'API [Gutendex](https://gutendex.com) sert
-uniquement à récupérer le fichier epub correspondant sur le Projet Gutenberg.
+La découverte pioche dans **toute la bibliothèque française du domaine public**
+via l'API [Gutendex](https://gutendex.com) (l'index du Projet Gutenberg) : à
+chaque période, deux livres sont tirés au hasard dans le corpus filtré. Les
+fiches sont **enrichies automatiquement** — genre déduit des sujets Gutenberg,
+couleur de couverture générée, résumé issu du champ `summaries` (ou des sujets),
+incipit lu depuis le texte brut en cas de besoin.
+
+Une petite sélection de **12 classiques** (dans `src/data/livres.js`) sert de
+**filet de secours hors-ligne** : si le réseau est indisponible, l'app propose
+ces livres-là au lieu d'un écran vide.
 
 ---
 
@@ -64,10 +72,13 @@ npm run preview    # prévisualise le build
 
 ---
 
-## Ajouter un livre au catalogue
+## Ajouter un livre au filet de secours
 
-Le catalogue est un simple tableau JavaScript dans **`src/data/livres.js`**.
-Pour ajouter un livre, copiez un bloc existant et complétez les champs :
+La découverte principale est automatique (tout Gutenberg en français) — il n'y a
+donc rien à faire pour « ajouter » un livre au catalogue, il suffit qu'il existe
+sur Gutenberg. En revanche, la **liste hors-ligne** de secours est un simple
+tableau JavaScript dans **`src/data/livres.js`**. Pour l'enrichir, copiez un bloc
+existant et complétez les champs :
 
 ```js
 {

@@ -7,7 +7,7 @@
 // - resume  : 1 à 2 phrases courtes et vendeuses.
 // - incipit : la vraie première phrase de l'œuvre (repli si l'epub échoue).
 
-export const LIVRES = [
+const SEED = [
   {
     id: "candide",
     titre: "Candide",
@@ -152,5 +152,15 @@ export const LIVRES = [
       "La sottise, l'erreur, le péché, la lésine, occupent nos esprits et travaillent nos corps.",
   },
 ];
+
+// Filet de secours hors-ligne : même forme que les fiches Gutendex.
+// epubUrl/texteUrl sont résolus à la volée (recherche) faute d'URL pré-calculée.
+export const LIVRES = SEED.map((l) => ({
+  epubUrl: null,
+  texteUrl: null,
+  epoque: null,
+  source: "seed",
+  ...l,
+}));
 
 export default LIVRES;
