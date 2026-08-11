@@ -263,6 +263,24 @@ function Carrousel({ livres, estGarde, onGarder, onLire, actif = true }) {
         ))}
       </div>
 
+      {/* Flèches cliquables : surtout utiles sur tablette/PC (pas de swipe souris) */}
+      <button
+        className="tr-fleche tr-fleche-g"
+        onClick={() => setIndex((i) => Math.max(0, i - 1))}
+        disabled={index === 0}
+        aria-label="Livre précédent"
+      >
+        ‹
+      </button>
+      <button
+        className="tr-fleche tr-fleche-d"
+        onClick={() => setIndex((i) => Math.min(nb - 1, i + 1))}
+        disabled={index === nb - 1}
+        aria-label="Livre suivant"
+      >
+        ›
+      </button>
+
       <div className="tr-points" aria-hidden="true">
         {livres.map((livre, i) => (
           <span

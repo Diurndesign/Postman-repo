@@ -15,6 +15,12 @@ body,
   height: 100%;
 }
 
+/* Fond de page explicite : évite les gouttières blanches sur écrans à encoche
+   (safe-area) et sert de toile de fond quand l'app est centrée sur grand écran. */
+body {
+  background: #e9e6de;
+}
+
 button {
   font-family: inherit;
   cursor: pointer;
@@ -185,10 +191,14 @@ button {
 /*  Carrousel                                                         */
 /* ================================================================== */
 .tr-carrousel {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Clippe la carte voisine à la colonne (évite qu'elle déborde dans les
+     marges sur tablette/PC, et supprime tout scroll horizontal). */
+  overflow: hidden;
 }
 
 .tr-piste {
@@ -197,6 +207,51 @@ button {
   min-height: 0;
   touch-action: pan-y; /* verrouillage d'axe : scroll vertical libre */
   will-change: transform;
+  cursor: grab;
+}
+
+.tr-piste:active {
+  cursor: grabbing;
+}
+
+/* Flèches de navigation : masquées sur mobile (on balaie), visibles au pointeur
+   sur tablette/PC où le glissé souris est moins naturel. */
+.tr-fleche {
+  position: absolute;
+  top: 44%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--encre);
+  background: var(--papier-2);
+  border: 1px solid var(--trait);
+  box-shadow: 0 4px 16px rgba(26, 24, 21, 0.16);
+  z-index: 4;
+  transition: transform 0.15s, background 0.15s, opacity 0.15s;
+}
+
+.tr-fleche-g { left: 8px; }
+.tr-fleche-d { right: 8px; }
+
+.tr-fleche:hover:not(:disabled) {
+  background: var(--papier);
+  transform: translateY(-50%) scale(1.06);
+}
+
+.tr-fleche:disabled {
+  opacity: 0.3;
+  cursor: default;
+  box-shadow: none;
+}
+
+@media (hover: hover) and (min-width: 700px) {
+  .tr-fleche { display: inline-flex; }
 }
 
 .tr-slot {
@@ -714,12 +769,67 @@ button {
 }
 
 /* ================================================================== */
-/*  Grands écrans                                                     */
+/*  Mobile-first : montée en gamme tablette / bureau                 */
 /* ================================================================== */
-@media (min-width: 720px) {
+
+/* Grande téléphone / petite tablette : la carte reste une colonne
+   confortable et centrée (on ne l'étire jamais sur toute la largeur). */
+@media (min-width: 600px) {
   .tr-decouverte {
-    max-width: 520px;
+    max-width: 560px;
     width: 100%;
     margin: 0 auto;
+    padding: 22px 20px 30px;
+  }
+}
+
+/* Tablette / bureau : bibliothèque plus large, découverte un peu plus ample. */
+@media (min-width: 720px) {
+  .tr-decouverte {
+    max-width: 600px;
+  }
+  .tr-biblio {
+    max-width: 1000px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .tr-carte {
+    border-radius: 18px;
+  }
+  .tr-grille {
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  }
+}
+
+/* Lecture : colonne à mesure lisible et centrée, plutôt que des lignes
+   qui s'étalent sur tout l'écran. */
+@media (min-width: 900px) {
+  .tr-reader-viewer {
+    left: 50%;
+    right: auto;
+    width: min(100%, 760px);
+    transform: translateX(-50%);
+  }
+  .tr-reader-bar,
+  .tr-reader-nav {
+    max-width: 760px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .tr-reader-nav {
+    justify-content: center;
+  }
+  .tr-reader-nav button {
+    max-width: 200px;
+  }
+}
+
+/* Très grand écran : l'app se pose au centre, sur la toile de fond papier. */
+@media (min-width: 1080px) {
+  .tr-root {
+    max-width: 1040px;
+    margin: 0 auto;
+    border-left: 1px solid var(--trait);
+    border-right: 1px solid var(--trait);
   }
 }
