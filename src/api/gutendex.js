@@ -183,9 +183,11 @@ function cleOeuvre(livre) {
 // Une page de résultats FR, normalisée et filtrée.
 // copyright=false : on ne garde que le vrai domaine public.
 // topic : filtre par sujet/rayon Gutenberg (ex. "fiction", "poetry").
-export async function listerPageFr(page = 1, { topic = null, signal } = {}) {
+// search : recherche libre (titre / auteur).
+export async function listerPageFr(page = 1, { topic = null, search = null, signal } = {}) {
   const t = topic ? `&topic=${encodeURIComponent(topic)}` : "";
-  const url = `${BASE}?languages=fr&copyright=false${t}&page=${page}`;
+  const s = search ? `&search=${encodeURIComponent(search)}` : "";
+  const url = `${BASE}?languages=fr&copyright=false${t}${s}&page=${page}`;
   const data = await fetchJson(url, signal);
   const brut = Array.isArray(data.results) ? data.results : [];
   const livres = brut
@@ -227,6 +229,17 @@ export async function piocherPoolFr({ pages = 2, topic = null, signal } = {}) {
     pool.push(livre);
   }
   return pool;
+}
+
+// Une page du catalogue pour la vue « Bibliothèque » (parcourir tout le
+// corpus FR). `suivant` indique s'il reste des pages à charger.
+export async function pageCatalogue({ search = null, page = 1, signal } = {}) {
+  const s = search ? `&search=${encodeURIComponent(search)}` : "";
+  const url = `${BASE}?languages=fr&copyright=false${s}&page=${page}`;
+  const data = await fetchJson(url, signal);
+  const brut = Array.isArray(data.results) ? data.results : [];
+  const livres = brut.filter(estExploitable).map(normaliser).filter(Boolean);
+  return { livres, suivant: Boolean(data.next), count: data.count || 0 };
 }
 
 // Recherche par titre + auteur (utilisé en repli pour les 12 livres seed,

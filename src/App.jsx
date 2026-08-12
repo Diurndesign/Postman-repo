@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { LIVRES } from "./data/livres.js";
-import { piocherPoolFr } from "./api/gutendex.js";
+import { piocherPoolFr, pageCatalogue } from "./api/gutendex.js";
 
 // Chargé à la demande : epub.js + jszip (~500 Ko) ne pèsent plus sur
 // l'écran de découverte, seulement à l'ouverture d'un livre.
@@ -13,6 +13,9 @@ const CLE_BIBLIO = "tranche.biblio";
 const CLE_CADENCE = "tranche.cadence";
 const CLE_DUEL = "tranche.duel";
 const CLE_CATEGORIE = "tranche.categorie";
+// Incrémenter invalide les duels mis en cache (nouveaux champs : résumé FR,
+// couverture Gutenberg…), pour qu'ils soient re-tirés avec les données à jour.
+const VERSION_DONNEES = 2;
 
 // Catégories proposées. On garde le principe « on ne choisit pas les 2 livres »,
 // mais on peut choisir DANS QUOI on pioche pour éviter les paires bancales
@@ -351,52 +354,216 @@ function Etoiles({ note, onNoter }) {
   );
 }
 
-function Bibliotheque({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
+function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
   if (entrees.length === 0) {
     return (
       <div className="tr-vide">
-        <p>Votre bibliothèque est vide.</p>
+        <p>Aucun favori pour l'instant.</p>
         <p className="tr-vide-sous">
-          Gardez un livre depuis la Découverte pour le retrouver ici.
+          Gardez un livre depuis la Découverte ou la Bibliothèque, notez-le et
+          écrivez ce que vous en avez pensé.
         </p>
       </div>
     );
   }
   return (
-    <div className="tr-grille">
+    <div className="tr-favoris">
       {entrees.map((entree) => {
         const livre = entree.livre;
         if (!livre) return null;
         return (
-          <div className="tr-item" key={livre.id}>
+          <article className="tr-favori" key={livre.id}>
             <button
-              className="tr-item-couv"
+              className="tr-favori-couv"
               onClick={() => onLire(livre)}
               aria-label={`Lire ${livre.titre}`}
             >
               <Couverture livre={livre} />
             </button>
-            <Etoiles note={entree.etoiles} onNoter={(n) => onNoter(livre.id, n)} />
-            {entree.carnet ? (
-              <p className="tr-carnet-apercu">« {entree.carnet} »</p>
-            ) : null}
-            <div className="tr-item-actions">
-              <button className="tr-lien" onClick={() => onCarnet(livre.id)}>
-                carnet
-              </button>
-              <button className="tr-lien" onClick={() => onLire(livre)}>
-                lire
-              </button>
-              <button
-                className="tr-lien tr-lien-danger"
-                onClick={() => onRetirer(livre.id)}
-              >
-                retirer
-              </button>
+            <div className="tr-favori-corps">
+              <h3 className="tr-favori-titre">{livre.titre}</h3>
+              <p className="tr-favori-auteur">{livre.auteur}</p>
+              <Etoiles note={entree.etoiles} onNoter={(n) => onNoter(livre.id, n)} />
+
+              {entree.carnet ? (
+                <button
+                  className="tr-note-card"
+                  onClick={() => onCarnet(livre.id)}
+                  title="Modifier la note"
+                >
+                  <span className="tr-note-label">Ce que j'en ai aimé</span>
+                  <span className="tr-note-texte">« {entree.carnet} »</span>
+                </button>
+              ) : (
+                <button
+                  className="tr-note-vide"
+                  onClick={() => onCarnet(livre.id)}
+                >
+                  + écrire une note
+                </button>
+              )}
+
+              <div className="tr-favori-actions">
+                <button className="tr-lien" onClick={() => onLire(livre)}>
+                  lire
+                </button>
+                <button className="tr-lien" onClick={() => onCarnet(livre.id)}>
+                  {entree.carnet ? "modifier la note" : "note"}
+                </button>
+                <button
+                  className="tr-lien tr-lien-danger"
+                  onClick={() => onRetirer(livre.id)}
+                >
+                  retirer
+                </button>
+              </div>
             </div>
-          </div>
+          </article>
         );
       })}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Bibliothèque : parcourir tout le catalogue FR                      */
+/* ------------------------------------------------------------------ */
+function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
+  const [saisie, setSaisie] = useState("");
+  const [requete, setRequete] = useState("");
+  const [livres, setLivres] = useState([]);
+  const [page, setPage] = useState(1);
+  const [suivant, setSuivant] = useState(false);
+  const [statut, setStatut] = useState("chargement"); // chargement | ok | vide | hors-ligne
+  const [plusEnCours, setPlusEnCours] = useState(false);
+  const vus = useRef(new Set());
+
+  useEffect(() => {
+    let annule = false;
+    const ctrl = new AbortController();
+
+    async function charger() {
+      if (page === 1) setStatut("chargement");
+      else setPlusEnCours(true);
+      try {
+        const r = await pageCatalogue({
+          search: requete || null,
+          page,
+          signal: ctrl.signal,
+        });
+        if (annule) return;
+        setSuivant(r.suivant);
+        setLivres((prev) => {
+          if (page === 1) vus.current = new Set();
+          const base = page === 1 ? [] : prev;
+          const out = base.slice();
+          for (const l of r.livres) {
+            if (vus.current.has(l.id)) continue;
+            vus.current.add(l.id);
+            out.push(l);
+          }
+          return out;
+        });
+        setStatut((s) => (page === 1 && r.livres.length === 0 ? "vide" : "ok"));
+      } catch (e) {
+        if (annule) return;
+        if (page === 1) {
+          setLivres(LIVRES);
+          setStatut("hors-ligne");
+        }
+      } finally {
+        if (!annule) setPlusEnCours(false);
+      }
+    }
+
+    charger();
+    return () => {
+      annule = true;
+      ctrl.abort();
+    };
+  }, [requete, page]);
+
+  function lancer(e) {
+    e.preventDefault();
+    setPage(1);
+    setRequete(saisie.trim());
+  }
+
+  return (
+    <div className="tr-catalogue">
+      <form className="tr-recherche" onSubmit={lancer}>
+        <input
+          type="search"
+          value={saisie}
+          onChange={(e) => setSaisie(e.target.value)}
+          placeholder="Chercher un titre, un auteur…"
+          aria-label="Rechercher un livre"
+        />
+        <button type="submit" className="tr-btn tr-btn-plein">
+          Chercher
+        </button>
+      </form>
+
+      {statut === "hors-ligne" && (
+        <p className="tr-note-reseau">
+          Hors ligne — aperçu du catalogue. Reconnecte-toi pour tout parcourir.
+        </p>
+      )}
+
+      {statut === "chargement" ? (
+        <div className="tr-chargement">
+          <span className="tr-reader-spin" />
+          <p>Chargement du catalogue…</p>
+        </div>
+      ) : statut === "vide" ? (
+        <p className="tr-vide">Aucun livre trouvé pour « {requete} ».</p>
+      ) : (
+        <>
+          <div className="tr-grille">
+            {livres.map((livre) => {
+              const garde = estGarde(livre.id);
+              return (
+                <div className="tr-item" key={livre.id}>
+                  <button
+                    className="tr-item-couv"
+                    onClick={() => onLire(livre)}
+                    aria-label={`Lire ${livre.titre}`}
+                  >
+                    <Couverture livre={livre} />
+                  </button>
+                  <div className="tr-item-info">
+                    <span className="tr-item-titre">{livre.titre}</span>
+                    <span className="tr-item-auteur">{livre.auteur}</span>
+                  </div>
+                  <div className="tr-item-actions">
+                    <button className="tr-lien" onClick={() => onLire(livre)}>
+                      lire
+                    </button>
+                    <button
+                      className={"tr-lien" + (garde ? " tr-lien-actif" : "")}
+                      onClick={() =>
+                        garde ? onRetirer(livre.id) : onGarder(livre)
+                      }
+                    >
+                      {garde ? "★ favori" : "☆ favori"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {suivant && (
+            <button
+              className="tr-plus-btn"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={plusEnCours}
+            >
+              {plusEnCours ? "Chargement…" : "Charger plus de livres"}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -433,6 +600,7 @@ export default function App() {
       const memo = lire(CLE_DUEL, null);
       if (
         memo &&
+        memo.v === VERSION_DONNEES &&
         memo.cle === cle &&
         memo.cadence === cadence &&
         memo.categorie === categorie &&
@@ -474,7 +642,7 @@ export default function App() {
 
       const paire = tirerPaire(pool, graineDepuis(categorie + ":" + cadence + ":" + cle));
       if (annule) return;
-      ecrire(CLE_DUEL, { cle, cadence, categorie, livres: paire });
+      ecrire(CLE_DUEL, { v: VERSION_DONNEES, cle, cadence, categorie, livres: paire });
       setDuel(paire);
       setStatut(horsLigne ? "hors-ligne" : "ok");
     }
@@ -546,10 +714,18 @@ export default function App() {
             Découverte
           </button>
           <button
-            className={"tr-onglet" + (vue === "biblio" ? " tr-onglet-actif" : "")}
-            onClick={() => setVue("biblio")}
+            className={"tr-onglet" + (vue === "catalogue" ? " tr-onglet-actif" : "")}
+            onClick={() => setVue("catalogue")}
           >
             Bibliothèque
+          </button>
+          <button
+            className={"tr-onglet" + (vue === "favoris" ? " tr-onglet-actif" : "")}
+            onClick={() => setVue("favoris")}
+            aria-label="Favoris"
+          >
+            <span className="tr-onglet-etoile">★</span>
+            <span className="tr-onglet-mot">Favoris</span>
             {biblio.length > 0 ? (
               <span className="tr-badge">{biblio.length}</span>
             ) : null}
@@ -614,9 +790,20 @@ export default function App() {
           </section>
         )}
 
-        {vue === "biblio" && (
+        {vue === "catalogue" && (
           <section className="tr-biblio">
-            <Bibliotheque
+            <Catalogue
+              estGarde={estGarde}
+              onGarder={garder}
+              onRetirer={retirer}
+              onLire={setLecture}
+            />
+          </section>
+        )}
+
+        {vue === "favoris" && (
+          <section className="tr-biblio">
+            <Favoris
               entrees={biblio}
               onNoter={noter}
               onCarnet={ouvrirCarnet}
