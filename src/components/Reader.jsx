@@ -19,18 +19,34 @@ const ORDRE_THEME = ["clair", "sepia", "nuit"];
 const ICONE_THEME = { clair: "☀", sepia: "◐", nuit: "☾" };
 const NOM_THEME = { clair: "Clair", sepia: "Sépia", nuit: "Veilleuse" };
 
-// Thèmes appliqués au CONTENU de l'epub (dans son iframe).
-const THEMES_EPUB = {
-  clair: { body: { color: "#1A1815 !important", background: "#F3F1EB !important" } },
-  sepia: { body: { color: "#4A3728 !important", background: "#EFE6D2 !important" } },
-  nuit: {
-    body: { color: "#E8E4DA !important", background: "#0F0F0F !important" },
-    a: { color: "#8FB7C0 !important" },
-  },
-};
 const FONT_MIN = 80;
 const FONT_MAX = 190;
 const FONT_PAS = 10;
+
+// Thèmes appliqués AU CONTENU de l'epub. On force la couleur ET le fond sur
+// tous les éléments de texte pour éviter le « texte invisible » (ex. texte
+// sombre resté sombre en veilleuse) et pour que le thème s'applique vraiment
+// au livre, pas seulement à l'habillage.
+const SEL_TEXTE =
+  "p,div,span,section,article,main,li,ul,ol,dl,dd,dt,blockquote,figure,figcaption,h1,h2,h3,h4,h5,h6,em,strong,i,b,small,sub,sup,td,th,tr,table,caption,pre,code,hr";
+
+function themeEpub(bg, texte, lien) {
+  return {
+    "html, body": { background: bg + " !important", color: texte + " !important" },
+    [SEL_TEXTE]: {
+      color: texte + " !important",
+      "background-color": "transparent !important",
+    },
+    a: { color: lien + " !important" },
+    "img, svg": { "max-width": "100% !important", height: "auto !important" },
+  };
+}
+
+const THEMES_EPUB = {
+  clair: themeEpub("#F3F1EB", "#1A1815", "#1D4E5A"),
+  sepia: themeEpub("#EFE6D2", "#4A3728", "#7A3B1B"),
+  nuit: themeEpub("#0F0F0F", "#E8E4DA", "#8FB7C0"),
+};
 
 function lire(cle, defaut) {
   try {
@@ -49,11 +65,10 @@ function ecrire(cle, val) {
 }
 
 // Télécharge l'epub en ArrayBuffer, en essayant chaque URL candidate.
-// Web : via le proxy /gutenberg. Natif : via CapacitorHttp (hors CORS).
 async function chargerBuffer(livre) {
   let candidats = urlsEpubCandidates(livre);
   if (!candidats.length) {
-    const r = await resoudreEpub(livre); // repli pour les 12 livres seed
+    const r = await resoudreEpub(livre);
     if (r) candidats = [r];
   }
   for (const u of candidats) {
@@ -74,7 +89,7 @@ async function chargerBuffer(livre) {
   throw new Error("epub illisible");
 }
 
-// Injecte dans chaque chapitre : anti-débordement + gestes tactiles (swipe).
+// Anti-débordement + gestes tactiles (swipe) injectés dans chaque chapitre.
 function preparerContenu(contents, rendition) {
   try {
     const doc = contents.document;
@@ -83,7 +98,7 @@ function preparerContenu(contents, rendition) {
       "img,svg{max-width:100%!important;height:auto!important}" +
       "body{overflow-wrap:break-word;word-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}" +
       "pre{white-space:pre-wrap!important}" +
-      "table{max-width:100%!important;display:block;overflow-x:auto}";
+      "table{max-width:100%!important}";
     (doc.head || doc.documentElement).appendChild(style);
 
     let x0 = null;
@@ -124,8 +139,12 @@ export default function Reader({ livre, onFermer }) {
   const viewerRef = useRef(null);
   const bookRef = useRef(null);
   const renditionRef = useRef(null);
+  const locPretesRef = useRef(false);
   const [etat, setEtat] = useState("chargement"); // chargement | ok | erreur
   const [incipit, setIncipit] = useState(livre.incipit || "");
+  const [toc, setToc] = useState([]);
+  const [tocOuvert, setTocOuvert] = useState(false);
+  const [progress, setProgress] = useState(null);
 
   const [font, setFont] = useState(() => {
     const n = parseInt(lire(CLE_FONT, "100"), 10);
@@ -156,15 +175,13 @@ export default function Reader({ livre, onFermer }) {
         await book.ready;
         if (annule) return;
 
-        // Dimensions numériques mesurées sur l'élément : évite que epub.js
-        // calcule une colonne plus large que l'écran (texte coupé à droite).
         const rect = el.getBoundingClientRect();
         const rendition = book.renderTo(el, {
           width: Math.max(1, Math.floor(rect.width)),
           height: Math.max(1, Math.floor(rect.height)),
           flow: "paginated",
           spread: "none",
-          minSpreadWidth: 100000, // force une seule colonne
+          minSpreadWidth: 100000,
           allowScriptedContent: false,
         });
         renditionRef.current = rendition;
@@ -181,16 +198,50 @@ export default function Reader({ livre, onFermer }) {
         if (annule) return;
 
         rendition.on("relocated", (loc) => {
-          if (loc && loc.start && loc.start.cfi) {
-            ecrire(CLE_POS + livre.id, loc.start.cfi);
+          if (!loc || !loc.start) return;
+          if (loc.start.cfi) ecrire(CLE_POS + livre.id, loc.start.cfi);
+          if (locPretesRef.current) {
+            try {
+              const p = book.locations.percentageFromCfi(loc.start.cfi);
+              if (typeof p === "number" && p >= 0) setProgress(Math.round(p * 100));
+            } catch (e) {
+              /* ignore */
+            }
           }
         });
 
-        // Reflow quand l'écran change de taille (rotation, redimensionnement).
+        // Sommaire (chapitres)
+        book.loaded.navigation
+          .then((nav) => {
+            if (!annule && nav && Array.isArray(nav.toc)) setToc(nav.toc);
+          })
+          .catch(() => {});
+
+        // Progression : génération des positions en tâche de fond
+        book.locations
+          .generate(1600)
+          .then(() => {
+            if (annule) return;
+            locPretesRef.current = true;
+            try {
+              const cur = rendition.currentLocation();
+              if (cur && cur.start && cur.start.cfi) {
+                const p = book.locations.percentageFromCfi(cur.start.cfi);
+                if (typeof p === "number" && p >= 0) setProgress(Math.round(p * 100));
+              }
+            } catch (e) {
+              /* ignore */
+            }
+          })
+          .catch(() => {});
+
         onResize = () => {
           try {
             const r = el.getBoundingClientRect();
-            rendition.resize(Math.max(1, Math.floor(r.width)), Math.max(1, Math.floor(r.height)));
+            rendition.resize(
+              Math.max(1, Math.floor(r.width)),
+              Math.max(1, Math.floor(r.height))
+            );
           } catch (e) {
             /* ignore */
           }
@@ -212,6 +263,7 @@ export default function Reader({ livre, onFermer }) {
 
     return () => {
       annule = true;
+      locPretesRef.current = false;
       if (onResize) window.removeEventListener("resize", onResize);
       try {
         if (renditionRef.current) renditionRef.current.destroy();
@@ -229,16 +281,19 @@ export default function Reader({ livre, onFermer }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [livre]);
 
-  // Clavier : flèches = pages, Échap = fermer.
+  // Clavier : flèches = pages, Échap = fermer / refermer le sommaire.
   useEffect(() => {
     function onKey(e) {
       if (e.key === "ArrowLeft") renditionRef.current && renditionRef.current.prev();
       else if (e.key === "ArrowRight") renditionRef.current && renditionRef.current.next();
-      else if (e.key === "Escape") onFermer();
+      else if (e.key === "Escape") {
+        if (tocOuvert) setTocOuvert(false);
+        else onFermer();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onFermer]);
+  }, [onFermer, tocOuvert]);
 
   function precedent() {
     if (renditionRef.current) renditionRef.current.prev();
@@ -262,13 +317,26 @@ export default function Reader({ livre, onFermer }) {
       return nt;
     });
   }
+  function allerChapitre(href) {
+    if (renditionRef.current && href) renditionRef.current.display(href);
+    setTocOuvert(false);
+  }
 
   return (
     <div className="tr-reader" data-lect={theme}>
       <header className="tr-reader-bar">
+        <button
+          className="tr-reader-icone"
+          onClick={() => setTocOuvert(true)}
+          disabled={!toc.length}
+          aria-label="Chapitres"
+          title="Chapitres"
+        >
+          ☰
+        </button>
         <span className="tr-reader-titre">{livre.titre}</span>
         <button
-          className="tr-reader-fermer"
+          className="tr-reader-icone"
           onClick={onFermer}
           aria-label="Fermer le lecteur"
         >
@@ -303,42 +371,69 @@ export default function Reader({ livre, onFermer }) {
             )}
           </div>
         )}
+
+        {tocOuvert && (
+          <div className="tr-toc-fond" onClick={() => setTocOuvert(false)}>
+            <nav className="tr-toc" onClick={(e) => e.stopPropagation()}>
+              <h3 className="tr-toc-titre">Chapitres</h3>
+              <ul className="tr-toc-liste">
+                {toc.map((it, i) => (
+                  <li key={it.href || i}>
+                    <button onClick={() => allerChapitre(it.href)}>
+                      {(it.label || "").trim() || "Chapitre"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </div>
+        )}
       </div>
 
       {etat === "ok" && (
-        <footer className="tr-reader-outils">
-          <div className="tr-outils-groupe">
-            <button
-              onClick={() => changerFont(-FONT_PAS)}
-              disabled={font <= FONT_MIN}
-              aria-label="Réduire le texte"
-            >
-              A−
-            </button>
-            <button
-              onClick={() => changerFont(FONT_PAS)}
-              disabled={font >= FONT_MAX}
-              aria-label="Agrandir le texte"
-            >
-              A+
-            </button>
-            <button
-              onClick={changerTheme}
-              aria-label={`Thème de lecture : ${NOM_THEME[theme]}. Cliquer pour changer.`}
-              title={`Thème : ${NOM_THEME[theme]}`}
-            >
-              {ICONE_THEME[theme]}
-            </button>
+        <>
+          <div className="tr-reader-progress" aria-hidden="true">
+            <i style={{ width: (progress == null ? 0 : progress) + "%" }} />
           </div>
-          <div className="tr-outils-groupe">
-            <button onClick={precedent} aria-label="Page précédente">
-              ‹
-            </button>
-            <button onClick={suivant} aria-label="Page suivante">
-              ›
-            </button>
-          </div>
-        </footer>
+          <footer className="tr-reader-outils">
+            <div className="tr-outils-groupe">
+              <button
+                onClick={() => changerFont(-FONT_PAS)}
+                disabled={font <= FONT_MIN}
+                aria-label="Réduire le texte"
+              >
+                A−
+              </button>
+              <button
+                onClick={() => changerFont(FONT_PAS)}
+                disabled={font >= FONT_MAX}
+                aria-label="Agrandir le texte"
+              >
+                A+
+              </button>
+              <button
+                onClick={changerTheme}
+                aria-label={`Thème de lecture : ${NOM_THEME[theme]}. Cliquer pour changer.`}
+                title={`Thème : ${NOM_THEME[theme]}`}
+              >
+                {ICONE_THEME[theme]}
+              </button>
+            </div>
+
+            <span className="tr-reader-pct">
+              {progress == null ? "…" : progress + " %"}
+            </span>
+
+            <div className="tr-outils-groupe">
+              <button onClick={precedent} aria-label="Page précédente">
+                ‹
+              </button>
+              <button onClick={suivant} aria-label="Page suivante">
+                ›
+              </button>
+            </div>
+          </footer>
+        </>
       )}
     </div>
   );

@@ -87,27 +87,26 @@ function genreDepuis(livre) {
   return "Littérature";
 }
 
-// Résumé : champ `summaries` de Gutendex si présent, sinon les sujets.
-function resumeDepuis(livre) {
-  const sommaires = Array.isArray(livre.summaries) ? livre.summaries : [];
-  if (sommaires.length) {
-    let s = String(sommaires[0]);
-    // On retire la mention automatique éventuelle en fin de résumé.
-    s = s.replace(/\s*\(This is an automatically generated summary[^)]*\)\s*$/i, "");
-    s = s.trim();
-    if (s.length > 260) {
-      const coupe = s.slice(0, 260);
-      const point = coupe.lastIndexOf(". ");
-      s = (point > 120 ? coupe.slice(0, point + 1) : coupe.trim() + "…");
-    }
-    if (s) return s;
-  }
-  const sujets = (livre.subjects || [])
-    .map((x) => x.split(" -- ")[0].trim())
-    .filter(Boolean);
-  const uniques = [...new Set(sujets)].slice(0, 3);
-  if (uniques.length) return uniques.join(" · ");
-  return "Un texte du domaine public, à découvrir.";
+// Résumé EN FRANÇAIS. Gutendex ne fournit que des résumés anglais (Wikipédia
+// EN) et des sujets anglais : on ne les affiche donc pas. À la place, une
+// phrase française selon le genre, qui met en avant « domaine public / gratuit ».
+const RESUME_FR = {
+  Roman: "Un roman du domaine public, à lire librement et gratuitement.",
+  Nouvelles: "Des nouvelles du domaine public, à savourer librement.",
+  Conte: "Un conte du domaine public, à (re)découvrir gratuitement.",
+  Aventure: "Un récit d'aventure du domaine public, libre et gratuit.",
+  Policier: "Une intrigue du domaine public, à lire librement.",
+  Poésie: "De la poésie du domaine public, à lire gratuitement.",
+  Théâtre: "Une pièce du domaine public, à découvrir librement.",
+  Essai: "Un essai du domaine public, à lire librement.",
+  Biographie: "Un récit de vie du domaine public, libre et gratuit.",
+  Histoire: "Un texte d'histoire du domaine public, à lire librement.",
+  Fantastique: "Un récit fantastique du domaine public, à lire librement.",
+  "Science-fiction": "Un récit d'anticipation du domaine public, libre et gratuit.",
+  Littérature: "Un classique du domaine public, à lire librement et gratuitement.",
+};
+function resumeFr(genre) {
+  return RESUME_FR[genre] || RESUME_FR["Littérature"];
 }
 
 function urlTexte(formats) {
@@ -128,6 +127,7 @@ export function normaliser(brut) {
   if (!brut.authors || !brut.authors.length) return null;
 
   const id = "gut-" + brut.id;
+  const genre = genreDepuis(brut);
   return {
     id,
     gutenbergId: brut.id,
@@ -135,9 +135,10 @@ export function normaliser(brut) {
     auteur: nomAuteur(brut.authors),
     annee: null, // année de l'œuvre non fournie par Gutendex
     epoque: epoqueAuteur(brut.authors),
-    genre: genreDepuis(brut),
+    genre,
     couleur: couleurPour(id),
-    resume: resumeDepuis(brut),
+    couvertureUrl: formats["image/jpeg"] || null, // vraie couverture Gutenberg
+    resume: resumeFr(genre),
     incipit: "", // chargé à la demande depuis le texte brut
     epubUrl: epub,
     texteUrl: urlTexte(formats),

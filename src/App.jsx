@@ -132,6 +132,18 @@ function migrerBiblio(brut) {
 /*  Couverture typographique (pas d'image)                             */
 /* ------------------------------------------------------------------ */
 function Couverture({ livre }) {
+  // Vraie couverture Gutenberg si disponible ; sinon couverture typographique.
+  if (livre.couvertureUrl) {
+    return (
+      <div className="tr-couv tr-couv-img">
+        <img
+          src={livre.couvertureUrl}
+          alt={`Couverture de « ${livre.titre} »`}
+          loading="lazy"
+        />
+      </div>
+    );
+  }
   return (
     <div className="tr-couv" style={{ background: livre.couleur }}>
       <span className="tr-couv-genre">{livre.genre}</span>
@@ -155,6 +167,9 @@ function Carte({ livre, garde, onGarder, onLire }) {
     <article className="tr-carte">
       <Couverture livre={livre} />
       <div className="tr-fiche">
+        {livre.couvertureUrl ? (
+          <h2 className="tr-fiche-titre">{livre.titre}</h2>
+        ) : null}
         <dl className="tr-meta">
           <div>
             <dt className="tr-label">Auteur</dt>
