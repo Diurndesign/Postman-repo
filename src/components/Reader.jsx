@@ -87,8 +87,8 @@ function preparerContenu(contents) {
     const doc = contents.document;
     const style = doc.createElement("style");
     style.textContent =
-      "html,body{margin:0!important;max-width:100%!important}" +
-      "body{padding:6px 18px 40px!important;overflow-wrap:break-word;word-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}" +
+      "html,body{margin:0!important;max-width:100%!important;overflow-x:hidden!important}" +
+      "body{padding:6px 18px 40px!important;box-sizing:border-box!important;overflow-wrap:break-word;word-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}" +
       "img,svg{max-width:100%!important;height:auto!important}" +
       "pre{white-space:pre-wrap!important}" +
       "table{max-width:100%!important;display:block;overflow-x:auto}";
@@ -150,14 +150,14 @@ export default function Reader({ livre, onFermer }) {
         await book.ready;
         if (annule) return;
 
-        // Lecture CONTINUE (défilement vertical) : le texte s'adapte toujours
-        // à la largeur (plus de coupe à droite), la taille reflow visiblement,
-        // et plus de pages blanches dans les gros livres.
+        // Lecture par défilement, gestionnaire PAR DÉFAUT (scrolled-doc) :
+        // le mode "continuous" d'epub.js rendait l'iframe plus large que
+        // l'écran (texte coupé à droite). scrolled-doc ajuste à la largeur
+        // du conteneur de façon fiable.
         const rendition = book.renderTo(el, {
           width: "100%",
           height: "100%",
-          flow: "scrolled",
-          manager: "continuous",
+          flow: "scrolled-doc",
           spread: "none",
           allowScriptedContent: false,
         });

@@ -1049,6 +1049,19 @@ button {
 .tr-reader-viewer {
   position: absolute;
   inset: 0;
+  overflow-x: hidden;
+}
+
+/* Garde-fou : force l'iframe et les conteneurs internes d'epub.js à ne jamais
+   dépasser la largeur visible (le texte s'ajuste au lieu d'être coupé). */
+.tr-reader-viewer iframe {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.tr-reader-viewer > div,
+.tr-reader-viewer .epub-view,
+.tr-reader-viewer .epub-container {
+  max-width: 100% !important;
 }
 
 .tr-reader-overlay {
