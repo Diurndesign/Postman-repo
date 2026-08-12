@@ -695,14 +695,20 @@ export default function App() {
       const cle = clePeriode(cadence);
       const memo = parseJSON(await stockage.get(CLE_DUEL), null);
       if (annule) return;
-      if (
+      // On ne réutilise un duel en cache que si ses deux livres sont LISIBLES
+      // (ils ont une source epub). Sinon c'est un duel de secours hors-ligne
+      // mémorisé par erreur → on re-pioche des livres live.
+      const memoLisible =
         memo &&
+        Array.isArray(memo.livres) &&
+        memo.livres.length >= 2 &&
+        memo.livres.every((l) => l && (l.gutenbergId || l.epubUrl));
+      if (
+        memoLisible &&
         memo.v === VERSION_DONNEES &&
         memo.cle === cle &&
         memo.cadence === cadence &&
-        memo.categorie === categorie &&
-        Array.isArray(memo.livres) &&
-        memo.livres.length >= 2
+        memo.categorie === categorie
       ) {
         setDuel(memo.livres);
         setStatut("ok");
@@ -758,10 +764,15 @@ export default function App() {
       );
       if (annule) return;
 
-      await stockage.set(
-        CLE_DUEL,
-        JSON.stringify({ v: VERSION_DONNEES, cle, cadence, categorie, livres: paire })
-      );
+      // On ne met en cache QUE les duels réels (en ligne). Un duel de secours
+      // hors-ligne n'est pas mémorisé, pour re-piocher des livres live dès que
+      // la connexion revient.
+      if (!horsLigne) {
+        await stockage.set(
+          CLE_DUEL,
+          JSON.stringify({ v: VERSION_DONNEES, cle, cadence, categorie, livres: paire })
+        );
+      }
       if (annule) return;
       setDuel(paire);
       setStatut(horsLigne ? "hors-ligne" : "ok");
