@@ -89,44 +89,19 @@ async function chargerBuffer(livre) {
   throw new Error("epub illisible");
 }
 
-// Anti-débordement + gestes tactiles (swipe) injectés dans chaque chapitre.
-function preparerContenu(contents, rendition) {
+// Adapte le contenu de chaque chapitre : marges propres, rien qui déborde
+// en largeur (le texte s'ajuste toujours à l'écran).
+function preparerContenu(contents) {
   try {
     const doc = contents.document;
     const style = doc.createElement("style");
     style.textContent =
+      "html,body{margin:0!important;max-width:100%!important}" +
+      "body{padding:6px 18px 40px!important;overflow-wrap:break-word;word-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}" +
       "img,svg{max-width:100%!important;height:auto!important}" +
-      "body{overflow-wrap:break-word;word-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}" +
       "pre{white-space:pre-wrap!important}" +
-      "table{max-width:100%!important}";
+      "table{max-width:100%!important;display:block;overflow-x:auto}";
     (doc.head || doc.documentElement).appendChild(style);
-
-    let x0 = null;
-    let y0 = null;
-    doc.addEventListener(
-      "touchstart",
-      (e) => {
-        const t = e.changedTouches[0];
-        x0 = t.clientX;
-        y0 = t.clientY;
-      },
-      { passive: true }
-    );
-    doc.addEventListener(
-      "touchend",
-      (e) => {
-        if (x0 == null) return;
-        const t = e.changedTouches[0];
-        const dx = t.clientX - x0;
-        const dy = t.clientY - y0;
-        if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) {
-          if (dx < 0) rendition.next();
-          else rendition.prev();
-        }
-        x0 = null;
-      },
-      { passive: true }
-    );
   } catch (e) {
     /* ignore */
   }
@@ -161,7 +136,6 @@ export default function Reader({ livre, onFermer }) {
 
   useEffect(() => {
     let annule = false;
-    let onResize = null;
 
     async function charger() {
       setEtat("chargement");
@@ -175,13 +149,15 @@ export default function Reader({ livre, onFermer }) {
         await book.ready;
         if (annule) return;
 
-        const rect = el.getBoundingClientRect();
+        // Lecture CONTINUE (défilement vertical) : le texte s'adapte toujours
+        // à la largeur (plus de coupe à droite), la taille reflow visiblement,
+        // et plus de pages blanches dans les gros livres.
         const rendition = book.renderTo(el, {
-          width: Math.max(1, Math.floor(rect.width)),
-          height: Math.max(1, Math.floor(rect.height)),
-          flow: "paginated",
+          width: "100%",
+          height: "100%",
+          flow: "scrolled",
+          manager: "continuous",
           spread: "none",
-          minSpreadWidth: 100000,
           allowScriptedContent: false,
         });
         renditionRef.current = rendition;
@@ -191,7 +167,7 @@ export default function Reader({ livre, onFermer }) {
         );
         rendition.themes.select(themeRef.current);
         rendition.themes.fontSize(fontRef.current + "%");
-        rendition.hooks.content.register((c) => preparerContenu(c, rendition));
+        rendition.hooks.content.register((c) => preparerContenu(c));
 
         const pos = lire(CLE_POS + livre.id, null);
         await rendition.display(pos || undefined);
@@ -235,19 +211,6 @@ export default function Reader({ livre, onFermer }) {
           })
           .catch(() => {});
 
-        onResize = () => {
-          try {
-            const r = el.getBoundingClientRect();
-            rendition.resize(
-              Math.max(1, Math.floor(r.width)),
-              Math.max(1, Math.floor(r.height))
-            );
-          } catch (e) {
-            /* ignore */
-          }
-        };
-        window.addEventListener("resize", onResize);
-
         setEtat("ok");
       } catch (e) {
         if (annule) return;
@@ -264,7 +227,6 @@ export default function Reader({ livre, onFermer }) {
     return () => {
       annule = true;
       locPretesRef.current = false;
-      if (onResize) window.removeEventListener("resize", onResize);
       try {
         if (renditionRef.current) renditionRef.current.destroy();
       } catch (e) {
