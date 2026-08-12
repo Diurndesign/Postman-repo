@@ -168,7 +168,7 @@ async function fetchJson(url, signal) {
 }
 
 // Clé de déduplication : même œuvre = même (titre + auteur) normalisés.
-function cleOeuvre(livre) {
+export function cleOeuvre(livre) {
   const sansAccents = /[̀-ͯ]/g; // marques diacritiques combinantes
   const norm = (s) =>
     (s || "")

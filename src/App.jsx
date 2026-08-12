@@ -1,6 +1,11 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { LIVRES } from "./data/livres.js";
-import { piocherPoolFr, pageCatalogue, chargerIncipit } from "./api/gutendex.js";
+import {
+  piocherPoolFr,
+  pageCatalogue,
+  chargerIncipit,
+  cleOeuvre,
+} from "./api/gutendex.js";
 
 // Chargé à la demande : epub.js + jszip (~500 Ko) ne pèsent plus sur
 // l'écran de découverte, seulement à l'ouverture d'un livre.
@@ -461,8 +466,11 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
           const base = page === 1 ? [] : prev;
           const out = base.slice();
           for (const l of r.livres) {
-            if (vus.current.has(l.id)) continue;
-            vus.current.add(l.id);
+            // Déduplication par œuvre (titre + auteur) : Gutenberg a souvent
+            // plusieurs éditions d'un même livre → on n'en garde qu'une.
+            const k = cleOeuvre(l);
+            if (vus.current.has(k)) continue;
+            vus.current.add(k);
             out.push(l);
           }
           return out;
