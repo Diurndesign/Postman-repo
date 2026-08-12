@@ -137,7 +137,8 @@ export function normaliser(brut) {
     epoque: epoqueAuteur(brut.authors),
     genre,
     couleur: couleurPour(id),
-    couvertureUrl: formats["image/jpeg"] || null, // vraie couverture Gutenberg
+    couvertureUrl: formats["image/jpeg"] || null, // couverture Gutenberg
+    telechargements: brut.download_count || 0, // popularité (départage les doublons)
     resume: resumeFr(genre),
     incipit: "", // chargé à la demande depuis le texte brut
     epubUrl: epub,

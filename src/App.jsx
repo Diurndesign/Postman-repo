@@ -438,70 +438,105 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
   const [requete, setRequete] = useState("");
   const [genre, setGenre] = useState("tout");
   const [livres, setLivres] = useState([]);
-  const [page, setPage] = useState(1);
   const [suivant, setSuivant] = useState(false);
   const [statut, setStatut] = useState("chargement"); // chargement | ok | vide | hors-ligne
   const [plusEnCours, setPlusEnCours] = useState(false);
-  const vus = useRef(new Set());
+
+  const pageRef = useRef(1);
+  const countRef = useRef(0);
+  const mapRef = useRef(new Map()); // cleOeuvre -> { index, livre }
+  const tokenRef = useRef(0);
   const cat = CATEGORIES.find((c) => c.id === genre) || CATEGORIES[0];
 
-  useEffect(() => {
-    let annule = false;
-    const ctrl = new AbortController();
+  // Entre deux éditions d'une même œuvre, on préfère celle qui a une
+  // couverture (image) puis, à égalité, la plus téléchargée.
+  // NB : Gutenberg sert la vraie couverture et l'auto-générée à la même URL,
+  // impossible de les distinguer par les métadonnées — c'est un pis-aller.
+  function estMeilleure(a, b) {
+    const ca = a.couvertureUrl ? 1 : 0;
+    const cb = b.couvertureUrl ? 1 : 0;
+    if (ca !== cb) return ca > cb;
+    return (a.telechargements || 0) > (b.telechargements || 0);
+  }
 
-    async function charger() {
-      if (page === 1) setStatut("chargement");
-      else setPlusEnCours(true);
-      try {
-        const r = await pageCatalogue({
-          search: requete || null,
-          topic: cat.topic,
-          page,
-          signal: ctrl.signal,
-        });
-        if (annule) return;
-        setSuivant(r.suivant);
-        setLivres((prev) => {
-          if (page === 1) vus.current = new Set();
-          const base = page === 1 ? [] : prev;
-          const out = base.slice();
-          for (const l of r.livres) {
-            // Déduplication par œuvre (titre + auteur) : Gutenberg a souvent
-            // plusieurs éditions d'un même livre → on n'en garde qu'une.
-            const k = cleOeuvre(l);
-            if (vus.current.has(k)) continue;
-            vus.current.add(k);
-            out.push(l);
+  async function charger(token, initial) {
+    if (!initial) setPlusEnCours(true);
+    try {
+      let ajoutes = 0;
+      let encore = true;
+      let iter = 0;
+      // On avance jusqu'à ajouter assez de NOUVEAUX livres, en sautant les
+      // pages entièrement composées de doublons (borné pour rester réactif).
+      while (ajoutes < 8 && encore && iter < 4) {
+        iter++;
+        const p = pageRef.current;
+        let r;
+        try {
+          r = await pageCatalogue({ search: requete || null, topic: cat.topic, page: p });
+        } catch (e) {
+          if (token !== tokenRef.current) return;
+          if (initial) {
+            setLivres(LIVRES);
+            setStatut("hors-ligne");
           }
-          return out;
-        });
-        setStatut((s) => (page === 1 && r.livres.length === 0 ? "vide" : "ok"));
-      } catch (e) {
-        if (annule) return;
-        if (page === 1) {
-          setLivres(LIVRES);
-          setStatut("hors-ligne");
+          return;
         }
-      } finally {
-        if (!annule) setPlusEnCours(false);
-      }
-    }
+        if (token !== tokenRef.current) return; // requête obsolète
+        pageRef.current = p + 1;
+        encore = r.suivant;
 
-    charger();
-    return () => {
-      annule = true;
-      ctrl.abort();
-    };
-  }, [requete, genre, page]);
+        const nouveaux = [];
+        const remplacements = [];
+        for (const l of r.livres) {
+          const k = cleOeuvre(l);
+          const existant = mapRef.current.get(k);
+          if (!existant) {
+            const index = countRef.current + nouveaux.length;
+            mapRef.current.set(k, { index, livre: l });
+            nouveaux.push(l);
+          } else if (estMeilleure(l, existant.livre)) {
+            existant.livre = l;
+            remplacements.push({ index: existant.index, livre: l });
+          }
+        }
+        countRef.current += nouveaux.length;
+        ajoutes += nouveaux.length;
+
+        if (nouveaux.length || remplacements.length) {
+          setLivres((prev) => {
+            const copy = prev.slice();
+            for (const rem of remplacements) copy[rem.index] = rem.livre;
+            return copy.concat(nouveaux);
+          });
+        }
+      }
+      if (token !== tokenRef.current) return;
+      setSuivant(encore);
+      setStatut(initial && countRef.current === 0 ? "vide" : "ok");
+    } finally {
+      if (token === tokenRef.current) setPlusEnCours(false);
+    }
+  }
+
+  // (Re)démarre depuis le début quand la recherche ou le genre change.
+  useEffect(() => {
+    const token = ++tokenRef.current;
+    pageRef.current = 1;
+    countRef.current = 0;
+    mapRef.current = new Map();
+    setLivres([]);
+    setSuivant(false);
+    setStatut("chargement");
+    charger(token, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requete, genre]);
 
   function lancer(e) {
     e.preventDefault();
-    setPage(1);
     setRequete(saisie.trim());
   }
 
   function choisirGenre(id) {
-    setPage(1);
     setGenre(id);
   }
 
@@ -584,7 +619,7 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
           {suivant && (
             <button
               className="tr-plus-btn"
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => charger(tokenRef.current, false)}
               disabled={plusEnCours}
             >
               {plusEnCours ? "Chargement…" : "Charger plus de livres"}
