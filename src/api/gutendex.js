@@ -75,6 +75,8 @@ function genreDepuis(livre) {
     ["short stories", "Nouvelles"],
     ["fairy tales", "Conte"],
     ["philosophy", "Essai"],
+    ["essays", "Essai"],
+    ["essay", "Essai"],
     ["history", "Histoire"],
     ["biography", "Biographie"],
     ["fiction", "Roman"],
@@ -179,8 +181,10 @@ function cleOeuvre(livre) {
 
 // Une page de résultats FR, normalisée et filtrée.
 // copyright=false : on ne garde que le vrai domaine public.
-export async function listerPageFr(page = 1, signal) {
-  const url = `${BASE}?languages=fr&copyright=false&page=${page}`;
+// topic : filtre par sujet/rayon Gutenberg (ex. "fiction", "poetry").
+export async function listerPageFr(page = 1, { topic = null, signal } = {}) {
+  const t = topic ? `&topic=${encodeURIComponent(topic)}` : "";
+  const url = `${BASE}?languages=fr&copyright=false${t}&page=${page}`;
   const data = await fetchJson(url, signal);
   const brut = Array.isArray(data.results) ? data.results : [];
   const livres = brut
@@ -192,9 +196,9 @@ export async function listerPageFr(page = 1, signal) {
 
 // Pioche un « pool » de découverte en tirant quelques pages au hasard.
 // Renvoie un tableau de fiches internes (peut être vide si le réseau échoue).
-export async function piocherPoolFr({ pages = 2, signal } = {}) {
+export async function piocherPoolFr({ pages = 2, topic = null, signal } = {}) {
   // 1ʳᵉ page : sert aussi à connaître le nombre total de pages.
-  const premiere = await listerPageFr(1, signal);
+  const premiere = await listerPageFr(1, { topic, signal });
   const total = Math.max(1, Math.ceil((premiere.count || PAR_PAGE) / PAR_PAGE));
 
   const brut = [...premiere.livres];
@@ -204,7 +208,7 @@ export async function piocherPoolFr({ pages = 2, signal } = {}) {
     if (dejaVues.has(p)) continue;
     dejaVues.add(p);
     try {
-      const page = await listerPageFr(p, signal);
+      const page = await listerPageFr(p, { topic, signal });
       brut.push(...page.livres);
     } catch (e) {
       /* on ignore une page qui échoue */
@@ -243,6 +247,20 @@ export async function resoudreEpub({ titre, auteur }) {
   } catch (e) {
     return null;
   }
+}
+
+// URLs epub à essayer pour la lecture, dans l'ordre. On privilégie les
+// fichiers DIRECTS du cache Gutenberg (pas de redirection => pas de casse
+// CORS via le proxy), et on retombe sur l'URL fournie par Gutendex.
+export function urlsEpubCandidates(livre) {
+  const urls = [];
+  const id = livre.gutenbergId;
+  if (id) {
+    urls.push(`https://www.gutenberg.org/cache/epub/${id}/pg${id}.epub`);
+    urls.push(`https://www.gutenberg.org/cache/epub/${id}/pg${id}-images-3.epub`);
+  }
+  if (livre.epubUrl) urls.push(livre.epubUrl);
+  return urls;
 }
 
 /* ------------------------------------------------------------------ */

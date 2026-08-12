@@ -4,8 +4,35 @@ import {
   resoudreEpub,
   urlLecture,
   chargerIncipit,
+  urlsEpubCandidates,
 } from "../api/gutendex.js";
 import { estNatif, telechargerEpubBuffer } from "../native.js";
+
+// Télécharge l'epub en ArrayBuffer, en essayant chaque URL candidate.
+// Web : via le proxy /gutenberg. Natif : via CapacitorHttp (hors CORS).
+async function chargerBuffer(livre) {
+  let candidats = urlsEpubCandidates(livre);
+  if (!candidats.length) {
+    const r = await resoudreEpub(livre); // repli pour les 12 livres seed
+    if (r) candidats = [r];
+  }
+  for (const u of candidats) {
+    try {
+      let buffer;
+      if (estNatif()) {
+        buffer = await telechargerEpubBuffer(u);
+      } else {
+        const rep = await fetch(urlLecture(u));
+        if (!rep.ok) continue;
+        buffer = await rep.arrayBuffer();
+      }
+      if (buffer && buffer.byteLength > 0) return buffer;
+    } catch (e) {
+      /* URL suivante */
+    }
+  }
+  throw new Error("epub illisible");
+}
 
 // Mémorisation de la position de lecture (CFI epub) par livre.
 const CLE_POS = "tranche.pos.";
@@ -39,23 +66,10 @@ export default function Reader({ livre, onFermer }) {
     async function charger() {
       setEtat("chargement");
       try {
-        let brut = livre.epubUrl;
-        if (!brut) brut = await resoudreEpub(livre); // repli pour les seeds
-        if (!brut) throw new Error("epub introuvable");
+        const buffer = await chargerBuffer(livre);
         if (annule) return;
 
-        // Web : on passe par le proxy /gutenberg (CORS).
-        // Natif (Android/iOS) : pas de proxy → on télécharge l'epub en
-        // ArrayBuffer via la couche native et on le lit localement.
-        let source;
-        if (estNatif()) {
-          source = await telechargerEpubBuffer(brut);
-        } else {
-          source = urlLecture(brut);
-        }
-        if (annule) return;
-
-        const book = ePub(source);
+        const book = ePub(buffer);
         bookRef.current = book;
 
         const rendition = book.renderTo(viewerRef.current, {

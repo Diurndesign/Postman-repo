@@ -162,6 +162,53 @@ button {
   border-color: var(--encre);
 }
 
+/* ---- Catégories -------------------------------------------------- */
+.tr-filtre-label {
+  text-align: center;
+  font-family: "Space Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--encre-2);
+  margin-bottom: 8px;
+}
+
+.tr-categories {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 14px;
+  scrollbar-width: none; /* Firefox */
+  -webkit-overflow-scrolling: touch;
+}
+
+.tr-categories::-webkit-scrollbar {
+  display: none; /* WebKit */
+}
+
+.tr-chip-cat {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--accent);
+  border-color: var(--trait);
+  background: var(--papier-2);
+}
+
+.tr-chip-cat.tr-chip-actif {
+  color: var(--papier-2);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (min-width: 600px) {
+  .tr-categories {
+    flex-wrap: wrap;
+    justify-content: center;
+    overflow-x: visible;
+  }
+}
+
 .tr-note-reseau {
   text-align: center;
   font-family: "Space Mono", monospace;

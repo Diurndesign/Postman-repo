@@ -12,6 +12,24 @@ const Reader = lazy(() => import("./components/Reader.jsx"));
 const CLE_BIBLIO = "tranche.biblio";
 const CLE_CADENCE = "tranche.cadence";
 const CLE_DUEL = "tranche.duel";
+const CLE_CATEGORIE = "tranche.categorie";
+
+// Catégories proposées. On garde le principe « on ne choisit pas les 2 livres »,
+// mais on peut choisir DANS QUOI on pioche pour éviter les paires bancales
+// (ex. une bio + un essai). `topic` filtre côté Gutendex ; `genres` affine
+// localement (doit correspondre aux libellés produits par genreDepuis).
+const CATEGORIES = [
+  { id: "tout", label: "Au hasard", topic: null, genres: null },
+  { id: "roman", label: "Romans", topic: "fiction", genres: ["Roman"] },
+  { id: "nouvelle", label: "Nouvelles", topic: "short stories", genres: ["Nouvelles"] },
+  { id: "conte", label: "Contes", topic: "fairy tales", genres: ["Conte"] },
+  { id: "aventure", label: "Aventure", topic: "adventure", genres: ["Aventure"] },
+  { id: "policier", label: "Policier", topic: "detective", genres: ["Policier"] },
+  { id: "poesie", label: "Poésie", topic: "poetry", genres: ["Poésie"] },
+  { id: "theatre", label: "Théâtre", topic: "drama", genres: ["Théâtre"] },
+  { id: "essai", label: "Essais", topic: "essays", genres: ["Essai"] },
+  { id: "biographie", label: "Biographies", topic: "biography", genres: ["Biographie"] },
+];
 
 function lire(cle, defaut) {
   try {
@@ -71,19 +89,23 @@ function tirerPaire(pool, graine) {
   const i1 = graine % n;
   const premier = pool[i1];
 
-  let second = null;
+  let diffGenre = null;
+  let diffAuteur = null;
+  let autre = null;
   for (let k = 1; k < n; k++) {
     const idx = (i1 + graine + k) % n;
     if (idx === i1) continue;
     const candidat = pool[idx];
+    if (!autre) autre = candidat;
+    if (!diffAuteur && candidat.auteur !== premier.auteur) diffAuteur = candidat;
     if (candidat.genre !== premier.genre) {
-      second = candidat;
+      diffGenre = candidat; // genre différent : idéal (mode « au hasard »)
       break;
     }
-    if (!second) second = candidat;
   }
-  if (!second) second = pool[(i1 + 1) % n];
 
+  // À défaut de genre différent (même catégorie), au moins un auteur différent.
+  const second = diffGenre || diffAuteur || autre || pool[(i1 + 1) % n];
   return [premier, second];
 }
 
@@ -370,6 +392,7 @@ function Bibliotheque({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
 export default function App() {
   const [vue, setVue] = useState("decouverte");
   const [cadence, setCadence] = useState(() => lire(CLE_CADENCE, "jour"));
+  const [categorie, setCategorie] = useState(() => lire(CLE_CATEGORIE, "tout"));
   const [biblio, setBiblio] = useState(() => migrerBiblio(lire(CLE_BIBLIO, [])));
   const [duel, setDuel] = useState([]);
   const [statut, setStatut] = useState("chargement"); // chargement | ok | hors-ligne
@@ -381,12 +404,14 @@ export default function App() {
 
   useEffect(() => ecrire(CLE_BIBLIO, biblio), [biblio]);
   useEffect(() => ecrire(CLE_CADENCE, cadence), [cadence]);
+  useEffect(() => ecrire(CLE_CATEGORIE, categorie), [categorie]);
 
   // Duel de la période : réutilisé tant que la clé ne change pas,
   // sinon on pioche un nouveau pool dans la bibliothèque française.
   useEffect(() => {
     let annule = false;
     const ctrl = new AbortController();
+    const cat = CATEGORIES.find((c) => c.id === categorie) || CATEGORIES[0];
 
     async function majDuel() {
       const cle = clePeriode(cadence);
@@ -395,6 +420,7 @@ export default function App() {
         memo &&
         memo.cle === cle &&
         memo.cadence === cadence &&
+        memo.categorie === categorie &&
         Array.isArray(memo.livres) &&
         memo.livres.length >= 2
       ) {
@@ -406,21 +432,34 @@ export default function App() {
       setStatut("chargement");
       let pool = [];
       try {
-        pool = await piocherPoolFr({ pages: 2, signal: ctrl.signal });
+        pool = await piocherPoolFr({ pages: 2, topic: cat.topic, signal: ctrl.signal });
       } catch (e) {
         pool = [];
       }
       if (annule) return;
 
+      // Affine à la catégorie si on a assez de livres correspondants,
+      // sinon on garde le pool (déjà biaisé par le topic) tel quel.
+      if (cat.genres) {
+        const dans = pool.filter((l) => cat.genres.includes(l.genre));
+        if (dans.length >= 2) pool = dans;
+      }
+
       let horsLigne = false;
       if (pool.length < 2) {
-        pool = LIVRES; // repli hors-ligne : catalogue curé
+        // Repli hors-ligne : catalogue curé, filtré par catégorie si possible.
+        let seed = LIVRES;
+        if (cat.genres) {
+          const s = LIVRES.filter((l) => cat.genres.includes(l.genre));
+          if (s.length >= 2) seed = s;
+        }
+        pool = seed;
         horsLigne = true;
       }
 
-      const paire = tirerPaire(pool, graineDepuis(cadence + ":" + cle));
+      const paire = tirerPaire(pool, graineDepuis(categorie + ":" + cadence + ":" + cle));
       if (annule) return;
-      ecrire(CLE_DUEL, { cle, cadence, livres: paire });
+      ecrire(CLE_DUEL, { cle, cadence, categorie, livres: paire });
       setDuel(paire);
       setStatut(horsLigne ? "hors-ligne" : "ok");
     }
@@ -430,7 +469,7 @@ export default function App() {
       annule = true;
       ctrl.abort();
     };
-  }, [cadence]);
+  }, [cadence, categorie]);
 
   function afficherToast(message) {
     setToast(message);
@@ -518,6 +557,22 @@ export default function App() {
                   onClick={() => setCadence(val)}
                 >
                   {texte}
+                </button>
+              ))}
+            </div>
+
+            <p className="tr-filtre-label">Envie de…</p>
+            <div className="tr-categories">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.id}
+                  className={
+                    "tr-chip tr-chip-cat" +
+                    (categorie === c.id ? " tr-chip-actif" : "")
+                  }
+                  onClick={() => setCategorie(c.id)}
+                >
+                  {c.label}
                 </button>
               ))}
             </div>
