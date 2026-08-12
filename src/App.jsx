@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { LIVRES } from "./data/livres.js";
-import { piocherPoolFr, pageCatalogue } from "./api/gutendex.js";
+import { piocherPoolFr, pageCatalogue, chargerIncipit } from "./api/gutendex.js";
 
 // Chargé à la demande : epub.js + jszip (~500 Ko) ne pèsent plus sur
 // l'écran de découverte, seulement à l'ouverture d'un livre.
@@ -15,7 +15,7 @@ const CLE_DUEL = "tranche.duel";
 const CLE_CATEGORIE = "tranche.categorie";
 // Incrémenter invalide les duels mis en cache (nouveaux champs : résumé FR,
 // couverture Gutenberg…), pour qu'ils soient re-tirés avec les données à jour.
-const VERSION_DONNEES = 2;
+const VERSION_DONNEES = 3;
 
 // Catégories proposées. On garde le principe « on ne choisit pas les 2 livres »,
 // mais on peut choisir DANS QUOI on pioche pour éviter les paires bancales
@@ -431,12 +431,14 @@ function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
 function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
   const [saisie, setSaisie] = useState("");
   const [requete, setRequete] = useState("");
+  const [genre, setGenre] = useState("tout");
   const [livres, setLivres] = useState([]);
   const [page, setPage] = useState(1);
   const [suivant, setSuivant] = useState(false);
   const [statut, setStatut] = useState("chargement"); // chargement | ok | vide | hors-ligne
   const [plusEnCours, setPlusEnCours] = useState(false);
   const vus = useRef(new Set());
+  const cat = CATEGORIES.find((c) => c.id === genre) || CATEGORIES[0];
 
   useEffect(() => {
     let annule = false;
@@ -448,6 +450,7 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
       try {
         const r = await pageCatalogue({
           search: requete || null,
+          topic: cat.topic,
           page,
           signal: ctrl.signal,
         });
@@ -481,12 +484,17 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
       annule = true;
       ctrl.abort();
     };
-  }, [requete, page]);
+  }, [requete, genre, page]);
 
   function lancer(e) {
     e.preventDefault();
     setPage(1);
     setRequete(saisie.trim());
+  }
+
+  function choisirGenre(id) {
+    setPage(1);
+    setGenre(id);
   }
 
   return (
@@ -503,6 +511,18 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
           Chercher
         </button>
       </form>
+
+      <div className="tr-filtres" role="group" aria-label="Filtrer par genre">
+        {CATEGORIES.map((c) => (
+          <button
+            key={c.id}
+            className={"tr-chip tr-chip-cat" + (genre === c.id ? " tr-chip-actif" : "")}
+            onClick={() => choisirGenre(c.id)}
+          >
+            {c.id === "tout" ? "Tous" : c.label}
+          </button>
+        ))}
+      </div>
 
       {statut === "hors-ligne" && (
         <p className="tr-note-reseau">
@@ -642,6 +662,25 @@ export default function App() {
 
       const paire = tirerPaire(pool, graineDepuis(categorie + ":" + cadence + ":" + cle));
       if (annule) return;
+
+      // Enrichit le résumé avec la vraie première phrase (incipit) FR quand on
+      // peut la récupérer ; sinon on garde la phrase générique par genre.
+      await Promise.all(
+        paire.map(async (livre) => {
+          if (!livre || !livre.texteUrl || livre.incipit) return;
+          try {
+            const inc = await chargerIncipit(livre.texteUrl, ctrl.signal);
+            if (inc) {
+              livre.incipit = inc;
+              livre.resume = inc;
+            }
+          } catch (e) {
+            /* on garde le résumé générique */
+          }
+        })
+      );
+      if (annule) return;
+
       ecrire(CLE_DUEL, { v: VERSION_DONNEES, cle, cadence, categorie, livres: paire });
       setDuel(paire);
       setStatut(horsLigne ? "hors-ligne" : "ok");

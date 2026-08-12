@@ -233,12 +233,19 @@ export async function piocherPoolFr({ pages = 2, topic = null, signal } = {}) {
 
 // Une page du catalogue pour la vue « Bibliothèque » (parcourir tout le
 // corpus FR). `suivant` indique s'il reste des pages à charger.
-export async function pageCatalogue({ search = null, page = 1, signal } = {}) {
+export async function pageCatalogue({ search = null, topic = null, page = 1, signal } = {}) {
   const s = search ? `&search=${encodeURIComponent(search)}` : "";
-  const url = `${BASE}?languages=fr&copyright=false${s}&page=${page}`;
+  const t = topic ? `&topic=${encodeURIComponent(topic)}` : "";
+  const url = `${BASE}?languages=fr&copyright=false${s}${t}&page=${page}`;
   const data = await fetchJson(url, signal);
   const brut = Array.isArray(data.results) ? data.results : [];
-  const livres = brut.filter(estExploitable).map(normaliser).filter(Boolean);
+  // Filtre RELÂCHÉ pour le catalogue : on n'exige pas de « sujets » (ça
+  // écartait trop de traductions françaises et cassait la recherche).
+  // normaliser() garde déjà uniquement les livres avec epub + auteur.
+  const livres = brut
+    .filter((b) => !b.media_type || b.media_type === "Text")
+    .map(normaliser)
+    .filter(Boolean);
   return { livres, suivant: Boolean(data.next), count: data.count || 0 };
 }
 
@@ -289,30 +296,54 @@ export function urlLecture(url) {
   return url.replace(/^https:\/\/(www\.)?gutenberg\.org/, "/gutenberg");
 }
 
-// Récupère l'incipit (première phrase) depuis le texte brut du livre.
-// Best-effort : renvoie "" si indisponible.
+// Extrait la vraie première phrase (incipit) d'un texte brut Gutenberg.
+// Best-effort : écarte l'en-tête, les titres/en-têtes en capitales, les
+// « CHAPITRE / PARTIE / TABLE… », et renvoie "" si rien de convaincant.
+export function extraireIncipit(texte) {
+  if (!texte) return "";
+  let corps = texte;
+  const m = texte.search(/\*\*\*\s*START OF (THE|THIS) PROJECT GUTENBERG/i);
+  if (m !== -1) {
+    const nl = texte.indexOf("\n", m);
+    if (nl !== -1) corps = texte.slice(nl + 1);
+  }
+  const paras = corps
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  for (const p of paras) {
+    if (p.length < 60 || p.length > 500) continue;
+    const lettres = p.replace(/[^A-Za-zÀ-ÿ]/g, "");
+    if (lettres.length < 30) continue;
+    if (!/[a-zà-ÿ]/.test(p)) continue; // pas que des capitales
+    const majuscules = (p.match(/[A-ZÀ-Þ]/g) || []).length;
+    if (majuscules / lettres.length > 0.55) continue; // titre en capitales
+    if (!/[.!?…»]/.test(p)) continue; // doit contenir de la ponctuation
+    if (
+      /^(chapitre|partie|livre|tome|table|pr[eé]face|introduction|avant-propos|acte|scène|sommaire|notes?|d[eé]dicace)\b/i.test(
+        p
+      )
+    )
+      continue;
+    const phrase = p.split(/(?<=[.!?…»])\s/)[0];
+    const out = phrase && phrase.length >= 40 ? phrase : p;
+    return out.slice(0, 320);
+  }
+  return "";
+}
+
+// Charge l'incipit depuis le texte brut, via une requête légère (Range).
 export async function chargerIncipit(texteUrl, signal) {
   if (!texteUrl) return "";
   try {
-    const r = await fetch(urlLecture(texteUrl), { signal });
-    if (!r.ok) return "";
+    const r = await fetch(urlLecture(texteUrl), {
+      signal,
+      headers: { Range: "bytes=0-60000" },
+    });
+    if (!r.ok && r.status !== 206) return "";
     const texte = await r.text();
-    // On saute l'en-tête Project Gutenberg si présent.
-    let corps = texte;
-    const marque = texte.indexOf("*** START");
-    if (marque !== -1) {
-      const finLigne = texte.indexOf("\n", marque);
-      if (finLigne !== -1) corps = texte.slice(finLigne + 1);
-    }
-    // Première ligne non vide un peu substantielle.
-    const lignes = corps.split(/\r?\n/).map((l) => l.trim());
-    for (const ligne of lignes) {
-      if (ligne.length >= 40) {
-        const phrase = ligne.split(/(?<=[.!?…»])\s/)[0];
-        return (phrase || ligne).slice(0, 240);
-      }
-    }
-    return "";
+    return extraireIncipit(texte);
   } catch (e) {
     return "";
   }

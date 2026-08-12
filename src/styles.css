@@ -675,6 +675,42 @@ button {
   padding: 10px 16px;
 }
 
+/* Filtres par genre (rangée défilante) */
+.tr-filtres {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 16px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tr-filtres::-webkit-scrollbar {
+  display: none;
+}
+
+.tr-chip-cat {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--accent);
+  border-color: var(--trait);
+  background: var(--papier-2);
+}
+
+.tr-chip-cat.tr-chip-actif {
+  color: var(--papier-2);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (min-width: 600px) {
+  .tr-filtres {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+}
+
 .tr-item-info {
   display: flex;
   flex-direction: column;
