@@ -689,17 +689,44 @@ button {
 }
 
 /* ================================================================== */
-/*  Lecteur plein écran                                               */
+/*  Lecteur plein écran — thèmes clair / sépia / veilleuse            */
 /* ================================================================== */
 .tr-reader {
+  /* Variables de thème de lecture (surchargées par [data-lect]). */
+  --rbg: #f3f1eb;
+  --rbar: #e9e6de;
+  --rtext: #1a1815;
+  --rtext-2: #4a453e;
+  --rline: #c9c4b8;
+  --rbtn: #f3f1eb;
+
   position: fixed;
   inset: 0;
   z-index: 80;
   display: flex;
   flex-direction: column;
-  background: var(--papier-2, #f3f1eb);
+  background: var(--rbg);
+  color: var(--rtext);
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.tr-reader[data-lect="sepia"] {
+  --rbg: #efe6d2;
+  --rbar: #e8ddc7;
+  --rtext: #4a3728;
+  --rtext-2: #7a6653;
+  --rline: #d9cbb0;
+  --rbtn: #efe6d2;
+}
+
+.tr-reader[data-lect="nuit"] {
+  --rbg: #0f0f0f;
+  --rbar: #1a1a1a;
+  --rtext: #e8e4da;
+  --rtext-2: #9a948a;
+  --rline: #333333;
+  --rbtn: #1f1f1f;
 }
 
 .tr-reader-bar {
@@ -708,8 +735,9 @@ button {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--trait, #c9c4b8);
-  background: var(--papier, #e9e6de);
+  border-bottom: 1px solid var(--rline);
+  background: var(--rbar);
+  color: var(--rtext);
 }
 
 .tr-reader-titre {
@@ -725,13 +753,14 @@ button {
   font-size: 18px;
   padding: 4px 10px;
   border-radius: 999px;
-  color: var(--encre, #1a1815);
+  color: var(--rtext);
 }
 
 .tr-reader-scene {
   position: relative;
   flex: 1;
   min-height: 0;
+  background: var(--rbg);
 }
 
 .tr-reader-viewer {
@@ -749,15 +778,15 @@ button {
   gap: 14px;
   text-align: center;
   padding: 32px;
-  background: var(--papier-2, #f3f1eb);
-  color: var(--encre-2, #4a453e);
+  background: var(--rbg);
+  color: var(--rtext-2);
 }
 
 .tr-reader-spin {
   width: 26px;
   height: 26px;
-  border: 2px solid var(--trait, #c9c4b8);
-  border-top-color: var(--accent, #1d4e5a);
+  border: 2px solid var(--rline);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: tr-tourne 0.8s linear infinite;
 }
@@ -782,7 +811,7 @@ button {
   font-style: italic;
   font-size: 19px;
   line-height: 1.5;
-  color: var(--encre, #1a1815);
+  color: var(--rtext);
 }
 
 .tr-reader-sign {
@@ -793,22 +822,44 @@ button {
   opacity: 0.7;
 }
 
-.tr-reader-nav {
+/* Barre d'outils : taille du texte, thème, pages */
+.tr-reader-outils {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--trait, #c9c4b8);
-  background: var(--papier, #e9e6de);
+  padding: 10px 14px;
+  border-top: 1px solid var(--rline);
+  background: var(--rbar);
 }
 
-.tr-reader-nav button {
-  flex: 1;
-  font-size: 14px;
-  font-weight: 500;
-  padding: 11px;
-  border: 1px solid var(--encre, #1a1815);
-  border-radius: 10px;
-  color: var(--encre, #1a1815);
+.tr-outils-groupe {
+  display: flex;
+  gap: 8px;
+}
+
+.tr-reader-outils button {
+  min-width: 46px;
+  height: 42px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--rtext);
+  background: var(--rbtn);
+  border: 1px solid var(--rline);
+  border-radius: 11px;
+  transition: transform 0.12s;
+}
+
+.tr-reader-outils button:active {
+  transform: scale(0.96);
+}
+
+.tr-reader-outils .tr-plus {
+  font-size: 12px;
 }
 
 /* ================================================================== */
@@ -854,16 +905,10 @@ button {
     transform: translateX(-50%);
   }
   .tr-reader-bar,
-  .tr-reader-nav {
+  .tr-reader-outils {
     max-width: 760px;
     width: 100%;
     margin: 0 auto;
-  }
-  .tr-reader-nav {
-    justify-content: center;
-  }
-  .tr-reader-nav button {
-    max-width: 200px;
   }
 }
 
