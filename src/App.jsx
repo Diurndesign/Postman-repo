@@ -19,16 +19,16 @@ const CLE_CATEGORIE = "tranche.categorie";
 // (ex. une bio + un essai). `topic` filtre côté Gutendex ; `genres` affine
 // localement (doit correspondre aux libellés produits par genreDepuis).
 const CATEGORIES = [
-  { id: "tout", label: "Au hasard", topic: null, genres: null },
-  { id: "roman", label: "Romans", topic: "fiction", genres: ["Roman"] },
-  { id: "nouvelle", label: "Nouvelles", topic: "short stories", genres: ["Nouvelles"] },
-  { id: "conte", label: "Contes", topic: "fairy tales", genres: ["Conte"] },
-  { id: "aventure", label: "Aventure", topic: "adventure", genres: ["Aventure"] },
-  { id: "policier", label: "Policier", topic: "detective", genres: ["Policier"] },
-  { id: "poesie", label: "Poésie", topic: "poetry", genres: ["Poésie"] },
-  { id: "theatre", label: "Théâtre", topic: "drama", genres: ["Théâtre"] },
-  { id: "essai", label: "Essais", topic: "essays", genres: ["Essai"] },
-  { id: "biographie", label: "Biographies", topic: "biography", genres: ["Biographie"] },
+  { id: "tout", label: "Au hasard", phrase: "au hasard", topic: null, genres: null },
+  { id: "roman", label: "Romans", phrase: "des romans", topic: "fiction", genres: ["Roman"] },
+  { id: "nouvelle", label: "Nouvelles", phrase: "des nouvelles", topic: "short stories", genres: ["Nouvelles"] },
+  { id: "conte", label: "Contes", phrase: "des contes", topic: "fairy tales", genres: ["Conte"] },
+  { id: "aventure", label: "Aventure", phrase: "de l'aventure", topic: "adventure", genres: ["Aventure"] },
+  { id: "policier", label: "Policier", phrase: "du policier", topic: "detective", genres: ["Policier"] },
+  { id: "poesie", label: "Poésie", phrase: "de la poésie", topic: "poetry", genres: ["Poésie"] },
+  { id: "theatre", label: "Théâtre", phrase: "du théâtre", topic: "drama", genres: ["Théâtre"] },
+  { id: "essai", label: "Essais", phrase: "des essais", topic: "essays", genres: ["Essai"] },
+  { id: "biographie", label: "Biographies", phrase: "des biographies", topic: "biography", genres: ["Biographie"] },
 ];
 
 function lire(cle, defaut) {
@@ -545,37 +545,33 @@ export default function App() {
       <main className="tr-main">
         {vue === "decouverte" && (
           <section className="tr-decouverte">
-            <div className="tr-cadences">
-              {[
-                ["jour", "Chaque jour"],
-                ["semaine", "Chaque semaine"],
-                ["mois", "Chaque mois"],
-              ].map(([val, texte]) => (
-                <button
-                  key={val}
-                  className={"tr-chip" + (cadence === val ? " tr-chip-actif" : "")}
-                  onClick={() => setCadence(val)}
-                >
-                  {texte}
-                </button>
-              ))}
-            </div>
-
-            <p className="tr-filtre-label">Envie de…</p>
-            <div className="tr-categories">
-              {CATEGORIES.map((c) => (
-                <button
-                  key={c.id}
-                  className={
-                    "tr-chip tr-chip-cat" +
-                    (categorie === c.id ? " tr-chip-actif" : "")
-                  }
-                  onClick={() => setCategorie(c.id)}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
+            <p className="tr-phrase">
+              Fais-moi découvrir un livre{" "}
+              <select
+                className="tr-select"
+                value={cadence}
+                onChange={(e) => setCadence(e.target.value)}
+                aria-label="Fréquence de découverte"
+              >
+                <option value="jour">chaque jour</option>
+                <option value="semaine">chaque semaine</option>
+                <option value="mois">chaque mois</option>
+              </select>
+              , plutôt{" "}
+              <select
+                className="tr-select"
+                value={categorie}
+                onChange={(e) => setCategorie(e.target.value)}
+                aria-label="Genre à découvrir"
+              >
+                {CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.phrase}
+                  </option>
+                ))}
+              </select>
+              .
+            </p>
 
             {statut === "hors-ligne" ? (
               <p className="tr-note-reseau">
