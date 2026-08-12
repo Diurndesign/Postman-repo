@@ -6,13 +6,15 @@ import {
   chargerIncipit,
   cleOeuvre,
 } from "./api/gutendex.js";
+import * as stockage from "./stockage.js";
 
 // Chargé à la demande : epub.js + jszip (~500 Ko) ne pèsent plus sur
 // l'écran de découverte, seulement à l'ouverture d'un livre.
 const Reader = lazy(() => import("./components/Reader.jsx"));
 
 /* ------------------------------------------------------------------ */
-/*  Persistance localStorage (toujours protégée par try/catch)         */
+/*  Persistance durable (src/stockage.js : Preferences en natif,        */
+/*  localStorage sur le web). Les valeurs sont stockées en JSON.        */
 /* ------------------------------------------------------------------ */
 const CLE_BIBLIO = "tranche.biblio";
 const CLE_CADENCE = "tranche.cadence";
@@ -39,20 +41,13 @@ const CATEGORIES = [
   { id: "biographie", label: "Biographies", phrase: "des biographies", topic: "biography", genres: ["Biographie"] },
 ];
 
-function lire(cle, defaut) {
+// Décodage JSON tolérant (les valeurs sont stockées en texte).
+function parseJSON(str, defaut) {
+  if (str == null) return defaut;
   try {
-    const brut = localStorage.getItem(cle);
-    return brut ? JSON.parse(brut) : defaut;
+    return JSON.parse(str);
   } catch (e) {
     return defaut;
-  }
-}
-
-function ecrire(cle, valeur) {
-  try {
-    localStorage.setItem(cle, JSON.stringify(valeur));
-  } catch (e) {
-    /* stockage indisponible : on ignore */
   }
 }
 
@@ -325,6 +320,11 @@ function Carrousel({ livres, estGarde, onGarder, onLire, actif = true }) {
       >
         ›
       </button>
+
+      {/* Annonce pour lecteurs d'écran, mise à jour à chaque changement */}
+      <div className="tr-sr" aria-live="polite" role="status">
+        {nb > 0 ? `Livre ${index + 1} sur ${nb}` : ""}
+      </div>
 
       <div className="tr-points" aria-hidden="true">
         {livres.map((livre, i) => (
@@ -636,9 +636,10 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
 /* ------------------------------------------------------------------ */
 export default function App() {
   const [vue, setVue] = useState("decouverte");
-  const [cadence, setCadence] = useState(() => lire(CLE_CADENCE, "jour"));
-  const [categorie, setCategorie] = useState(() => lire(CLE_CATEGORIE, "tout"));
-  const [biblio, setBiblio] = useState(() => migrerBiblio(lire(CLE_BIBLIO, [])));
+  const [cadence, setCadence] = useState("jour");
+  const [categorie, setCategorie] = useState("tout");
+  const [biblio, setBiblio] = useState([]);
+  const [pret, setPret] = useState(false); // hydratation terminée
   const [duel, setDuel] = useState([]);
   const [statut, setStatut] = useState("chargement"); // chargement | ok | hors-ligne
   const [lecture, setLecture] = useState(null);
@@ -647,20 +648,53 @@ export default function App() {
   const [toast, setToast] = useState("");
   const toastRef = useRef(null);
 
-  useEffect(() => ecrire(CLE_BIBLIO, biblio), [biblio]);
-  useEffect(() => ecrire(CLE_CADENCE, cadence), [cadence]);
-  useEffect(() => ecrire(CLE_CATEGORIE, categorie), [categorie]);
+  // Hydratation au démarrage (asynchrone) : migration native one-shot puis
+  // lecture des préférences. Le premier paint montre l'état "chargement"
+  // (rendu plus bas) — on ne bloque pas l'affichage.
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      await stockage.migrerVersNatif();
+      const [cad, catg, bib] = await Promise.all([
+        stockage.get(CLE_CADENCE),
+        stockage.get(CLE_CATEGORIE),
+        stockage.get(CLE_BIBLIO),
+      ]);
+      if (annule) return;
+      setCadence(parseJSON(cad, "jour"));
+      setCategorie(parseJSON(catg, "tout"));
+      setBiblio(migrerBiblio(parseJSON(bib, [])));
+      setPret(true);
+    })();
+    return () => {
+      annule = true;
+    };
+  }, []);
+
+  // Écritures : seulement après hydratation, pour ne pas écraser avec les
+  // valeurs par défaut avant d'avoir lu ce qui est stocké.
+  useEffect(() => {
+    if (pret) stockage.set(CLE_BIBLIO, JSON.stringify(biblio));
+  }, [biblio, pret]);
+  useEffect(() => {
+    if (pret) stockage.set(CLE_CADENCE, JSON.stringify(cadence));
+  }, [cadence, pret]);
+  useEffect(() => {
+    if (pret) stockage.set(CLE_CATEGORIE, JSON.stringify(categorie));
+  }, [categorie, pret]);
 
   // Duel de la période : réutilisé tant que la clé ne change pas,
   // sinon on pioche un nouveau pool dans la bibliothèque française.
   useEffect(() => {
+    if (!pret) return undefined; // on attend l'hydratation des préférences
     let annule = false;
     const ctrl = new AbortController();
     const cat = CATEGORIES.find((c) => c.id === categorie) || CATEGORIES[0];
 
     async function majDuel() {
       const cle = clePeriode(cadence);
-      const memo = lire(CLE_DUEL, null);
+      const memo = parseJSON(await stockage.get(CLE_DUEL), null);
+      if (annule) return;
       if (
         memo &&
         memo.v === VERSION_DONNEES &&
@@ -724,7 +758,11 @@ export default function App() {
       );
       if (annule) return;
 
-      ecrire(CLE_DUEL, { v: VERSION_DONNEES, cle, cadence, categorie, livres: paire });
+      await stockage.set(
+        CLE_DUEL,
+        JSON.stringify({ v: VERSION_DONNEES, cle, cadence, categorie, livres: paire })
+      );
+      if (annule) return;
       setDuel(paire);
       setStatut(horsLigne ? "hors-ligne" : "ok");
     }
@@ -734,7 +772,7 @@ export default function App() {
       annule = true;
       ctrl.abort();
     };
-  }, [cadence, categorie]);
+  }, [cadence, categorie, pret]);
 
   function afficherToast(message) {
     setToast(message);
@@ -816,6 +854,13 @@ export default function App() {
       </header>
 
       <main className="tr-main">
+        {!pret ? (
+          <div className="tr-chargement">
+            <span className="tr-reader-spin" />
+            <p>Chargement…</p>
+          </div>
+        ) : (
+          <>
         {vue === "decouverte" && (
           <section className="tr-decouverte">
             <p className="tr-phrase">
@@ -893,6 +938,8 @@ export default function App() {
               onLire={setLecture}
             />
           </section>
+        )}
+          </>
         )}
       </main>
 

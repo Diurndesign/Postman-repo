@@ -7,6 +7,7 @@ import {
   urlsEpubCandidates,
 } from "../api/gutendex.js";
 import { estNatif, telechargerEpubBuffer } from "../native.js";
+import * as stockage from "../stockage.js";
 
 /* ------------------------------------------------------------------ */
 /*  Préférences de lecture (persistées)                                */
@@ -48,20 +49,10 @@ const THEMES_EPUB = {
   nuit: themeEpub("#0F0F0F", "#E8E4DA", "#8FB7C0"),
 };
 
-function lire(cle, defaut) {
-  try {
-    const v = localStorage.getItem(cle);
-    return v == null ? defaut : v;
-  } catch (e) {
-    return defaut;
-  }
-}
-function ecrire(cle, val) {
-  try {
-    localStorage.setItem(cle, val);
-  } catch (e) {
-    /* ignore */
-  }
+// Borne la taille de police lue depuis le stockage.
+function normaliserFont(brut) {
+  const n = parseInt(brut || "100", 10);
+  return Number.isFinite(n) ? Math.min(FONT_MAX, Math.max(FONT_MIN, n)) : 100;
 }
 
 // Télécharge l'epub en ArrayBuffer, en essayant chaque URL candidate.
@@ -121,14 +112,10 @@ export default function Reader({ livre, onFermer }) {
   const [tocOuvert, setTocOuvert] = useState(false);
   const [progress, setProgress] = useState(null);
 
-  const [font, setFont] = useState(() => {
-    const n = parseInt(lire(CLE_FONT, "100"), 10);
-    return Number.isFinite(n) ? Math.min(FONT_MAX, Math.max(FONT_MIN, n)) : 100;
-  });
-  const [theme, setTheme] = useState(() => {
-    const t = lire(CLE_THEME, "clair");
-    return ORDRE_THEME.includes(t) ? t : "clair";
-  });
+  // Valeurs par défaut ; les préférences réelles sont hydratées (async) au
+  // montage, avant l'application au rendu epub (voir charger()).
+  const [font, setFont] = useState(100);
+  const [theme, setTheme] = useState("clair");
   const fontRef = useRef(font);
   const themeRef = useRef(theme);
   fontRef.current = font;
@@ -140,6 +127,20 @@ export default function Reader({ livre, onFermer }) {
     async function charger() {
       setEtat("chargement");
       try {
+        // Préférences de lecture (durables, asynchrones) — lues avant
+        // d'initialiser le rendu pour les appliquer d'emblée.
+        const [fSaved, tSaved] = await Promise.all([
+          stockage.get(CLE_FONT),
+          stockage.get(CLE_THEME),
+        ]);
+        if (annule) return;
+        const f = normaliserFont(fSaved);
+        const t = ORDRE_THEME.includes(tSaved) ? tSaved : "clair";
+        fontRef.current = f;
+        themeRef.current = t;
+        setFont(f);
+        setTheme(t);
+
         const buffer = await chargerBuffer(livre);
         if (annule) return;
 
@@ -169,13 +170,14 @@ export default function Reader({ livre, onFermer }) {
         rendition.themes.fontSize(fontRef.current + "%");
         rendition.hooks.content.register((c) => preparerContenu(c));
 
-        const pos = lire(CLE_POS + livre.id, null);
+        const pos = await stockage.get(CLE_POS + livre.id);
+        if (annule) return;
         await rendition.display(pos || undefined);
         if (annule) return;
 
         rendition.on("relocated", (loc) => {
           if (!loc || !loc.start) return;
-          if (loc.start.cfi) ecrire(CLE_POS + livre.id, loc.start.cfi);
+          if (loc.start.cfi) stockage.set(CLE_POS + livre.id, loc.start.cfi);
           if (locPretesRef.current) {
             try {
               const p = book.locations.percentageFromCfi(loc.start.cfi);
@@ -193,23 +195,29 @@ export default function Reader({ livre, onFermer }) {
           })
           .catch(() => {});
 
-        // Progression : génération des positions en tâche de fond
-        book.locations
-          .generate(1600)
-          .then(() => {
-            if (annule) return;
-            locPretesRef.current = true;
-            try {
-              const cur = rendition.currentLocation();
-              if (cur && cur.start && cur.start.cfi) {
-                const p = book.locations.percentageFromCfi(cur.start.cfi);
-                if (typeof p === "number" && p >= 0) setProgress(Math.round(p * 100));
+        // Progression : génération des positions en tâche de fond.
+        // On ne la lance QUE si le composant est encore monté (elle parcourt
+        // tout le livre et peut être coûteuse). Compromis : on utilise un pas
+        // plus large (moins de positions) → génération plus légère, au prix
+        // d'un pourcentage un peu moins granulaire.
+        if (!annule) {
+          book.locations
+            .generate(2400)
+            .then(() => {
+              if (annule) return;
+              locPretesRef.current = true;
+              try {
+                const cur = rendition.currentLocation();
+                if (cur && cur.start && cur.start.cfi) {
+                  const p = book.locations.percentageFromCfi(cur.start.cfi);
+                  if (typeof p === "number" && p >= 0) setProgress(Math.round(p * 100));
+                }
+              } catch (e) {
+                /* ignore */
               }
-            } catch (e) {
-              /* ignore */
-            }
-          })
-          .catch(() => {});
+            })
+            .catch(() => {});
+        }
 
         setEtat("ok");
       } catch (e) {
@@ -266,7 +274,7 @@ export default function Reader({ livre, onFermer }) {
   function changerFont(delta) {
     setFont((f) => {
       const nf = Math.min(FONT_MAX, Math.max(FONT_MIN, f + delta));
-      ecrire(CLE_FONT, String(nf));
+      stockage.set(CLE_FONT, String(nf));
       if (renditionRef.current) renditionRef.current.themes.fontSize(nf + "%");
       return nf;
     });
@@ -274,7 +282,7 @@ export default function Reader({ livre, onFermer }) {
   function changerTheme() {
     setTheme((t) => {
       const nt = ORDRE_THEME[(ORDRE_THEME.indexOf(t) + 1) % ORDRE_THEME.length];
-      ecrire(CLE_THEME, nt);
+      stockage.set(CLE_THEME, nt);
       if (renditionRef.current) renditionRef.current.themes.select(nt);
       return nt;
     });
