@@ -45,17 +45,21 @@ function nettoyerExtrait(txt) {
   return s;
 }
 
-// URL de l'epub ws-export (réécrite via le proxy /wsexport à la lecture).
-export function urlEpubWs(titre) {
-  return `${WSEXPORT}/?format=epub-3&lang=fr&page=${encodeURIComponent(titre)}`;
+// URLs epub ws-export à essayer (epub-3 puis epub-2), réécrites via le proxy
+// /wsexport à la lecture.
+export function urlsEpubWs(titre) {
+  const p = encodeURIComponent(titre);
+  return [
+    `${WSEXPORT}/?format=epub-3&lang=fr&page=${p}`,
+    `${WSEXPORT}/?format=epub&lang=fr&page=${p}`,
+  ];
 }
 
 function normaliserWs(page, genre) {
   if (!page || !page.title || page.missing !== undefined) return null;
-  // On écarte les pages de maintenance / sous-pages techniques.
-  if (/\//.test(page.title) && !genre) {
-    // les sous-pages (chapitres) polluent la recherche — on garde les racines
-  }
+  // On écarte les sous-pages (chapitres) : « Œuvre/Chapitre » → on ne garde
+  // que les pages racines (exportables proprement en epub).
+  if (page.title.includes("/")) return null;
   const id = "ws-" + (page.pageid || page.title);
   let auteur = "";
   const liens = Array.isArray(page.links) ? page.links : [];

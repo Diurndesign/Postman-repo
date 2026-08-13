@@ -6,7 +6,7 @@ import {
   chargerIncipit,
   urlsEpubCandidates,
 } from "../api/gutendex.js";
-import { urlEpubWs } from "../api/wikisource.js";
+import { urlsEpubWs } from "../api/wikisource.js";
 import { estNatif, telechargerEpubBuffer } from "../native.js";
 import * as stockage from "../stockage.js";
 
@@ -56,6 +56,14 @@ function normaliserFont(brut) {
   return Number.isFinite(n) ? Math.min(FONT_MAX, Math.max(FONT_MIN, n)) : 100;
 }
 
+// Un epub est un zip : il commence par la signature « PK » (0x50 0x4B).
+// Ça permet de détecter quand le proxy renvoie du HTML/erreur au lieu du fichier.
+function estEpub(buffer) {
+  if (!buffer || buffer.byteLength < 4) return false;
+  const b = new Uint8Array(buffer, 0, 2);
+  return b[0] === 0x50 && b[1] === 0x4b;
+}
+
 // Récupère un epub en ArrayBuffer depuis une URL (proxy web / natif).
 async function bufferDepuis(url) {
   if (estNatif()) return telechargerEpubBuffer(url);
@@ -64,12 +72,19 @@ async function bufferDepuis(url) {
   return rep.arrayBuffer();
 }
 
-// Télécharge l'epub en ArrayBuffer, en essayant chaque URL candidate.
+// Télécharge l'epub en ArrayBuffer, en essayant chaque URL candidate et en
+// vérifiant qu'on a bien reçu un epub.
 async function chargerBuffer(livre) {
-  // Source Wikisource : epub généré à la volée par ws-export.
+  // Source Wikisource : epub généré à la volée par ws-export (epub-3 puis epub).
   if (livre.sourceType === "wikisource" && livre.wsPage) {
-    const buffer = await bufferDepuis(urlEpubWs(livre.wsPage));
-    if (buffer && buffer.byteLength > 0) return buffer;
+    for (const u of urlsEpubWs(livre.wsPage)) {
+      try {
+        const buffer = await bufferDepuis(u);
+        if (estEpub(buffer)) return buffer;
+      } catch (e) {
+        /* format suivant */
+      }
+    }
     throw new Error("epub Wikisource illisible");
   }
 
@@ -85,15 +100,8 @@ async function chargerBuffer(livre) {
   }
   for (const u of candidats) {
     try {
-      let buffer;
-      if (estNatif()) {
-        buffer = await telechargerEpubBuffer(u);
-      } else {
-        const rep = await fetch(urlLecture(u));
-        if (!rep.ok) continue;
-        buffer = await rep.arrayBuffer();
-      }
-      if (buffer && buffer.byteLength > 0) return buffer;
+      const buffer = await bufferDepuis(u);
+      if (estEpub(buffer)) return buffer;
     } catch (e) {
       /* URL suivante */
     }
