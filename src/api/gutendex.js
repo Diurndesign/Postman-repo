@@ -300,7 +300,9 @@ export function urlsEpubCandidates(livre) {
 // - en production, c'est la réécriture Vercel (vercel.json).
 export function urlLecture(url) {
   if (!url) return url;
-  return url.replace(/^https:\/\/(www\.)?gutenberg\.org/, "/gutenberg");
+  return url
+    .replace(/^https:\/\/(www\.)?gutenberg\.org/, "/gutenberg")
+    .replace(/^https:\/\/ws-export\.wmcloud\.org/, "/wsexport");
 }
 
 // Extrait la vraie première phrase (incipit) d'un texte brut Gutenberg.

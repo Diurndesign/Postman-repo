@@ -6,6 +6,7 @@ import {
   chargerIncipit,
   urlsEpubCandidates,
 } from "../api/gutendex.js";
+import { urlEpubWs } from "../api/wikisource.js";
 import { estNatif, telechargerEpubBuffer } from "../native.js";
 import * as stockage from "../stockage.js";
 
@@ -55,8 +56,23 @@ function normaliserFont(brut) {
   return Number.isFinite(n) ? Math.min(FONT_MAX, Math.max(FONT_MIN, n)) : 100;
 }
 
+// Récupère un epub en ArrayBuffer depuis une URL (proxy web / natif).
+async function bufferDepuis(url) {
+  if (estNatif()) return telechargerEpubBuffer(url);
+  const rep = await fetch(urlLecture(url));
+  if (!rep.ok) throw new Error("HTTP " + rep.status);
+  return rep.arrayBuffer();
+}
+
 // Télécharge l'epub en ArrayBuffer, en essayant chaque URL candidate.
 async function chargerBuffer(livre) {
+  // Source Wikisource : epub généré à la volée par ws-export.
+  if (livre.sourceType === "wikisource" && livre.wsPage) {
+    const buffer = await bufferDepuis(urlEpubWs(livre.wsPage));
+    if (buffer && buffer.byteLength > 0) return buffer;
+    throw new Error("epub Wikisource illisible");
+  }
+
   let candidats = urlsEpubCandidates(livre);
   if (!candidats.length) {
     const trouve = await resoudreEpub(livre); // { id, epubUrl } | null

@@ -60,6 +60,16 @@ export default defineConfig({
             },
           },
           {
+            // API Wikisource (recherche / catégories) : idem, cache immédiat.
+            urlPattern: /^https:\/\/fr\.wikisource\.org\/w\/api\.php.*/i,
+            handler: "StaleWhileRevalidate",
+            options: {
+              cacheName: "wikisource",
+              expiration: { maxEntries: 120, maxAgeSeconds: 60 * 60 * 24 * 3 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
             // Couvertures Gutenberg : immuables → cache d'abord.
             urlPattern: /^https:\/\/www\.gutenberg\.org\/cache\/epub\/.*\.(jpg|jpeg|png)$/i,
             handler: "CacheFirst",
@@ -80,6 +90,11 @@ export default defineConfig({
         target: "https://www.gutenberg.org",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/gutenberg/, ""),
+      },
+      "/wsexport": {
+        target: "https://ws-export.wmcloud.org",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/wsexport/, ""),
       },
     },
   },

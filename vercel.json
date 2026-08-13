@@ -4,6 +4,10 @@
     {
       "source": "/gutenberg/:path*",
       "destination": "https://www.gutenberg.org/:path*"
+    },
+    {
+      "source": "/wsexport/:path*",
+      "destination": "https://ws-export.wmcloud.org/:path*"
     }
   ]
 }

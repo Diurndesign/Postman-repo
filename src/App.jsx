@@ -6,6 +6,7 @@ import {
   chargerIncipit,
   cleOeuvre,
 } from "./api/gutendex.js";
+import { pageWikisource } from "./api/wikisource.js";
 import * as stockage from "./stockage.js";
 
 // Chargé à la demande : epub.js + jszip (~500 Ko) ne pèsent plus sur
@@ -28,17 +29,19 @@ const VERSION_DONNEES = 3;
 // mais on peut choisir DANS QUOI on pioche pour éviter les paires bancales
 // (ex. une bio + un essai). `topic` filtre côté Gutendex ; `genres` affine
 // localement (doit correspondre aux libellés produits par genreDepuis).
+// `topic` filtre Gutendex ; `genres` affine localement (labels de genreDepuis) ;
+// `wsCat` = catégorie Wikisource correspondante (null → « Bon pour export »).
 const CATEGORIES = [
-  { id: "tout", label: "Au hasard", phrase: "au hasard", topic: null, genres: null },
-  { id: "roman", label: "Romans", phrase: "des romans", topic: "fiction", genres: ["Roman"] },
-  { id: "nouvelle", label: "Nouvelles", phrase: "des nouvelles", topic: "short stories", genres: ["Nouvelles"] },
-  { id: "conte", label: "Contes", phrase: "des contes", topic: "fairy tales", genres: ["Conte"] },
-  { id: "aventure", label: "Aventure", phrase: "de l'aventure", topic: "adventure", genres: ["Aventure"] },
-  { id: "policier", label: "Policier", phrase: "du policier", topic: "detective", genres: ["Policier"] },
-  { id: "poesie", label: "Poésie", phrase: "de la poésie", topic: "poetry", genres: ["Poésie"] },
-  { id: "theatre", label: "Théâtre", phrase: "du théâtre", topic: "drama", genres: ["Théâtre"] },
-  { id: "essai", label: "Essais", phrase: "des essais", topic: "essays", genres: ["Essai"] },
-  { id: "biographie", label: "Biographies", phrase: "des biographies", topic: "biography", genres: ["Biographie"] },
+  { id: "tout", label: "Au hasard", phrase: "au hasard", topic: null, genres: null, wsCat: null },
+  { id: "roman", label: "Romans", phrase: "des romans", topic: "fiction", genres: ["Roman"], wsCat: "Romans" },
+  { id: "nouvelle", label: "Nouvelles", phrase: "des nouvelles", topic: "short stories", genres: ["Nouvelles"], wsCat: "Nouvelles" },
+  { id: "conte", label: "Contes", phrase: "des contes", topic: "fairy tales", genres: ["Conte"], wsCat: "Contes" },
+  { id: "aventure", label: "Aventure", phrase: "de l'aventure", topic: "adventure", genres: ["Aventure"], wsCat: null },
+  { id: "policier", label: "Policier", phrase: "du policier", topic: "detective", genres: ["Policier"], wsCat: null },
+  { id: "poesie", label: "Poésie", phrase: "de la poésie", topic: "poetry", genres: ["Poésie"], wsCat: "Poésie" },
+  { id: "theatre", label: "Théâtre", phrase: "du théâtre", topic: "drama", genres: ["Théâtre"], wsCat: "Théâtre" },
+  { id: "essai", label: "Essais", phrase: "des essais", topic: "essays", genres: ["Essai"], wsCat: null },
+  { id: "biographie", label: "Biographies", phrase: "des biographies", topic: "biography", genres: ["Biographie"], wsCat: null },
 ];
 
 // Décodage JSON tolérant (les valeurs sont stockées en texte).
@@ -442,6 +445,7 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
   const [saisie, setSaisie] = useState("");
   const [requete, setRequete] = useState("");
   const [genre, setGenre] = useState("tout");
+  const [source, setSource] = useState("gutenberg"); // gutenberg | wikisource
   const [livres, setLivres] = useState([]);
   const [suivant, setSuivant] = useState(false);
   const [statut, setStatut] = useState("chargement"); // chargement | ok | vide | hors-ligne
@@ -477,7 +481,16 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
         const p = pageRef.current;
         let r;
         try {
-          r = await pageCatalogue({ search: requete || null, topic: cat.topic, page: p });
+          if (source === "wikisource") {
+            r = await pageWikisource({
+              search: requete || null,
+              category: cat.wsCat,
+              genreLabel: genre === "tout" ? null : cat.label,
+              page: p,
+            });
+          } else {
+            r = await pageCatalogue({ search: requete || null, topic: cat.topic, page: p });
+          }
         } catch (e) {
           if (token !== tokenRef.current) return;
           if (initial) {
@@ -534,7 +547,7 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
     setStatut("chargement");
     charger(token, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requete, genre]);
+  }, [requete, genre, source]);
 
   function lancer(e) {
     e.preventDefault();
@@ -559,6 +572,21 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
           Chercher
         </button>
       </form>
+
+      <div className="tr-filtres" role="group" aria-label="Source des livres">
+        <button
+          className={"tr-chip tr-chip-cat" + (source === "gutenberg" ? " tr-chip-actif" : "")}
+          onClick={() => setSource("gutenberg")}
+        >
+          Gutenberg
+        </button>
+        <button
+          className={"tr-chip tr-chip-cat" + (source === "wikisource" ? " tr-chip-actif" : "")}
+          onClick={() => setSource("wikisource")}
+        >
+          Wikisource
+        </button>
+      </div>
 
       <div className="tr-filtres" role="group" aria-label="Filtrer par genre">
         {CATEGORIES.map((c) => (
