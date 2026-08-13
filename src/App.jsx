@@ -134,15 +134,20 @@ function migrerBiblio(brut) {
 /* ------------------------------------------------------------------ */
 /*  Couverture typographique (pas d'image)                             */
 /* ------------------------------------------------------------------ */
-function Couverture({ livre }) {
+function Couverture({ livre, petite }) {
   // Vraie couverture Gutenberg si disponible ; sinon couverture typographique.
   if (livre.couvertureUrl) {
+    // Dans les grilles, on charge la vignette (cover.small) : bien plus légère.
+    const src = petite
+      ? livre.couvertureUrl.replace(".cover.medium.", ".cover.small.")
+      : livre.couvertureUrl;
     return (
       <div className="tr-couv tr-couv-img">
         <img
-          src={livre.couvertureUrl}
+          src={src}
           alt={`Couverture de « ${livre.titre} »`}
           loading="lazy"
+          decoding="async"
         />
       </div>
     );
@@ -383,7 +388,7 @@ function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
               onClick={() => onLire(livre)}
               aria-label={`Lire ${livre.titre}`}
             >
-              <Couverture livre={livre} />
+              <Couverture livre={livre} petite />
             </button>
             <div className="tr-favori-corps">
               <h3 className="tr-favori-titre">{livre.titre}</h3>
@@ -592,7 +597,7 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
                     onClick={() => onLire(livre)}
                     aria-label={`Lire ${livre.titre}`}
                   >
-                    <Couverture livre={livre} />
+                    <Couverture livre={livre} petite />
                   </button>
                   <div className="tr-item-info">
                     <span className="tr-item-titre">{livre.titre}</span>
@@ -718,7 +723,7 @@ export default function App() {
       setStatut("chargement");
       let pool = [];
       try {
-        pool = await piocherPoolFr({ pages: 2, topic: cat.topic, signal: ctrl.signal });
+        pool = await piocherPoolFr({ pages: 1, topic: cat.topic, signal: ctrl.signal });
       } catch (e) {
         pool = [];
       }
@@ -746,27 +751,8 @@ export default function App() {
       const paire = tirerPaire(pool, graineDepuis(categorie + ":" + cadence + ":" + cle));
       if (annule) return;
 
-      // Enrichit le résumé avec la vraie première phrase (incipit) FR quand on
-      // peut la récupérer ; sinon on garde la phrase générique par genre.
-      await Promise.all(
-        paire.map(async (livre) => {
-          if (!livre || !livre.texteUrl || livre.incipit) return;
-          try {
-            const inc = await chargerIncipit(livre.texteUrl, ctrl.signal);
-            if (inc) {
-              livre.incipit = inc;
-              livre.resume = inc;
-            }
-          } catch (e) {
-            /* on garde le résumé générique */
-          }
-        })
-      );
-      if (annule) return;
-
-      // On ne met en cache QUE les duels réels (en ligne). Un duel de secours
-      // hors-ligne n'est pas mémorisé, pour re-piocher des livres live dès que
-      // la connexion revient.
+      // 1) AFFICHAGE IMMÉDIAT (résumé générique) + mise en cache de la base.
+      //    On ne mémorise QUE les duels réels (en ligne).
       if (!horsLigne) {
         await stockage.set(
           CLE_DUEL,
@@ -776,6 +762,31 @@ export default function App() {
       if (annule) return;
       setDuel(paire);
       setStatut(horsLigne ? "hors-ligne" : "ok");
+
+      // 2) Enrichissement du résumé avec l'incipit FR, EN ARRIÈRE-PLAN : on ne
+      //    bloque plus l'affichage de la carte pour télécharger le texte.
+      if (!horsLigne) {
+        (async () => {
+          const enrichies = await Promise.all(
+            paire.map(async (livre) => {
+              if (!livre || !livre.texteUrl || livre.incipit) return livre;
+              try {
+                const inc = await chargerIncipit(livre.texteUrl, ctrl.signal);
+                return inc ? { ...livre, incipit: inc, resume: inc } : livre;
+              } catch (e) {
+                return livre;
+              }
+            })
+          );
+          if (annule) return;
+          if (enrichies.every((l, i) => l === paire[i])) return; // rien de neuf
+          setDuel(enrichies);
+          stockage.set(
+            CLE_DUEL,
+            JSON.stringify({ v: VERSION_DONNEES, cle, cadence, categorie, livres: enrichies })
+          );
+        })();
+      }
     }
 
     majDuel();
