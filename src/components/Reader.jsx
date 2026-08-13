@@ -110,7 +110,6 @@ export default function Reader({ livre, onFermer }) {
   const viewerRef = useRef(null);
   const bookRef = useRef(null);
   const renditionRef = useRef(null);
-  const locPretesRef = useRef(false);
   const [etat, setEtat] = useState("chargement"); // chargement | ok | erreur
   const [incipit, setIncipit] = useState(livre.incipit || "");
   const [toc, setToc] = useState([]);
@@ -180,16 +179,26 @@ export default function Reader({ livre, onFermer }) {
         await rendition.display(pos || undefined);
         if (annule) return;
 
+        const totalSpine =
+          (book.spine &&
+            (book.spine.length ||
+              (book.spine.items && book.spine.items.length) ||
+              (book.spine.spineItems && book.spine.spineItems.length))) ||
+          1;
+
         rendition.on("relocated", (loc) => {
           if (!loc || !loc.start) return;
           if (loc.start.cfi) stockage.set(CLE_POS + livre.id, loc.start.cfi);
-          if (locPretesRef.current) {
-            try {
-              const p = book.locations.percentageFromCfi(loc.start.cfi);
-              if (typeof p === "number" && p >= 0) setProgress(Math.round(p * 100));
-            } catch (e) {
-              /* ignore */
+          // Progression par index de CHAPITRE (spine) : instantané, sans
+          // générer toutes les positions du livre (ce qui bloquait le fil
+          // principal et provoquait des à-coups au changement de chapitre).
+          try {
+            const idx = typeof loc.start.index === "number" ? loc.start.index : 0;
+            if (totalSpine > 1) {
+              setProgress(Math.round((idx / (totalSpine - 1)) * 100));
             }
+          } catch (e) {
+            /* ignore */
           }
         });
 
@@ -199,30 +208,6 @@ export default function Reader({ livre, onFermer }) {
             if (!annule && nav && Array.isArray(nav.toc)) setToc(nav.toc);
           })
           .catch(() => {});
-
-        // Progression : génération des positions en tâche de fond.
-        // On ne la lance QUE si le composant est encore monté (elle parcourt
-        // tout le livre et peut être coûteuse). Compromis : on utilise un pas
-        // plus large (moins de positions) → génération plus légère, au prix
-        // d'un pourcentage un peu moins granulaire.
-        if (!annule) {
-          book.locations
-            .generate(2400)
-            .then(() => {
-              if (annule) return;
-              locPretesRef.current = true;
-              try {
-                const cur = rendition.currentLocation();
-                if (cur && cur.start && cur.start.cfi) {
-                  const p = book.locations.percentageFromCfi(cur.start.cfi);
-                  if (typeof p === "number" && p >= 0) setProgress(Math.round(p * 100));
-                }
-              } catch (e) {
-                /* ignore */
-              }
-            })
-            .catch(() => {});
-        }
 
         setEtat("ok");
       } catch (e) {
@@ -239,7 +224,6 @@ export default function Reader({ livre, onFermer }) {
 
     return () => {
       annule = true;
-      locPretesRef.current = false;
       try {
         if (renditionRef.current) renditionRef.current.destroy();
       } catch (e) {
