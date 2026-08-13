@@ -59,8 +59,13 @@ function normaliserFont(brut) {
 async function chargerBuffer(livre) {
   let candidats = urlsEpubCandidates(livre);
   if (!candidats.length) {
-    const r = await resoudreEpub(livre);
-    if (r) candidats = [r];
+    const trouve = await resoudreEpub(livre); // { id, epubUrl } | null
+    if (trouve) {
+      candidats = urlsEpubCandidates({
+        gutenbergId: trouve.id,
+        epubUrl: trouve.epubUrl,
+      });
+    }
   }
   for (const u of candidats) {
     try {

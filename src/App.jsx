@@ -641,6 +641,9 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
 /* ------------------------------------------------------------------ */
 export default function App() {
   const [vue, setVue] = useState("decouverte");
+  // Onglets déjà ouverts : on les garde MONTÉS (masqués) pour que revenir
+  // dessus soit instantané (la Bibliothèque ne se recharge plus).
+  const [visite, setVisite] = useState({ decouverte: true });
   const [cadence, setCadence] = useState("jour");
   const [categorie, setCategorie] = useState("tout");
   const [biblio, setBiblio] = useState([]);
@@ -841,6 +844,11 @@ export default function App() {
     ? biblio.find((e) => e.livre.id === carnetPour)
     : null;
 
+  function ouvrir(v) {
+    setVue(v);
+    setVisite((s) => (s[v] ? s : { ...s, [v]: true }));
+  }
+
   return (
     <div className="tr-root">
       <header className="tr-entete">
@@ -851,19 +859,19 @@ export default function App() {
         <nav className="tr-nav">
           <button
             className={"tr-onglet" + (vue === "decouverte" ? " tr-onglet-actif" : "")}
-            onClick={() => setVue("decouverte")}
+            onClick={() => ouvrir("decouverte")}
           >
             Découverte
           </button>
           <button
             className={"tr-onglet" + (vue === "catalogue" ? " tr-onglet-actif" : "")}
-            onClick={() => setVue("catalogue")}
+            onClick={() => ouvrir("catalogue")}
           >
             Bibliothèque
           </button>
           <button
             className={"tr-onglet" + (vue === "favoris" ? " tr-onglet-actif" : "")}
-            onClick={() => setVue("favoris")}
+            onClick={() => ouvrir("favoris")}
             aria-label="Favoris"
           >
             <span className="tr-onglet-etoile">★</span>
@@ -883,8 +891,11 @@ export default function App() {
           </div>
         ) : (
           <>
-        {vue === "decouverte" && (
-          <section className="tr-decouverte">
+        {visite.decouverte && (
+          <section
+            className="tr-decouverte"
+            style={{ display: vue === "decouverte" ? undefined : "none" }}
+          >
             <p className="tr-phrase">
               Fais-moi découvrir un livre{" "}
               <select
@@ -931,7 +942,7 @@ export default function App() {
                 estGarde={estGarde}
                 onGarder={garder}
                 onLire={setLecture}
-                actif={!lecture && !carnetPour}
+                actif={vue === "decouverte" && !lecture && !carnetPour}
               />
             ) : (
               <p className="tr-vide">Aucun duel disponible.</p>
@@ -939,8 +950,11 @@ export default function App() {
           </section>
         )}
 
-        {vue === "catalogue" && (
-          <section className="tr-biblio">
+        {visite.catalogue && (
+          <section
+            className="tr-biblio"
+            style={{ display: vue === "catalogue" ? undefined : "none" }}
+          >
             <Catalogue
               estGarde={estGarde}
               onGarder={garder}
@@ -950,8 +964,11 @@ export default function App() {
           </section>
         )}
 
-        {vue === "favoris" && (
-          <section className="tr-biblio">
+        {visite.favoris && (
+          <section
+            className="tr-biblio"
+            style={{ display: vue === "favoris" ? undefined : "none" }}
+          >
             <Favoris
               entrees={biblio}
               onNoter={noter}

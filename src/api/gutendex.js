@@ -160,12 +160,19 @@ function estExploitable(brut) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Requêtes réseau                                                    */
+/*  Requêtes réseau (avec cache mémoire par session)                   */
 /* ------------------------------------------------------------------ */
+const _cacheJson = new Map(); // url -> { t, data }
+const _TTL = 10 * 60 * 1000; // 10 min
+
 async function fetchJson(url, signal) {
+  const hit = _cacheJson.get(url);
+  if (hit && Date.now() - hit.t < _TTL) return hit.data; // réponse instantanée
   const r = await fetch(url, { signal });
   if (!r.ok) throw new Error("HTTP " + r.status);
-  return r.json();
+  const data = await r.json();
+  _cacheJson.set(url, { t: Date.now(), data });
+  return data;
 }
 
 // Clé de déduplication : même œuvre = même (titre + auteur) normalisés.
@@ -250,20 +257,19 @@ export async function pageCatalogue({ search = null, topic = null, page = 1, sig
   return { livres, suivant: Boolean(data.next), count: data.count || 0 };
 }
 
-// Recherche par titre + auteur (utilisé en repli pour les 12 livres seed,
-// qui n'ont pas d'URL epub pré-résolue). Renvoie l'URL epub ou null.
+// Recherche par titre + auteur (repli pour les 12 livres seed, sans epub
+// pré-résolu). Renvoie { id, epubUrl } pour permettre de construire les URLs
+// DIRECTES du cache Gutenberg (lecture fiable), ou null.
 export async function resoudreEpub({ titre, auteur }) {
   try {
     const requete = encodeURIComponent(titre + " " + auteur);
-    const reponse = await fetch(
+    const data = await fetchJson(
       `${BASE}?languages=fr&copyright=false&search=` + requete
     );
-    if (!reponse.ok) return null;
-    const data = await reponse.json();
     const resultats = Array.isArray(data.results) ? data.results : [];
     for (const livre of resultats) {
       const epub = (livre.formats || {})["application/epub+zip"];
-      if (epub) return epub;
+      if (epub) return { id: livre.id, epubUrl: epub };
     }
     return null;
   } catch (e) {
