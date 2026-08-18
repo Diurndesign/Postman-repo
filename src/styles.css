@@ -1301,3 +1301,114 @@ button {
     border-right: 1px solid var(--trait);
   }
 }
+
+/* ---- Statut de lecture : pastilles lu / en cours ----------------- */
+.tr-item-couv,
+.tr-favori-couv {
+  position: relative;
+}
+
+.tr-item-pastille {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.tr-etat {
+  display: inline-block;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  padding: 4px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(26, 24, 21, 0.18);
+}
+
+.tr-etat-lu {
+  color: var(--papier-2);
+  background: var(--accent);
+}
+
+.tr-etat-cours {
+  color: var(--papier-2);
+  background: var(--encre-2);
+}
+
+/* ---- Bannière « Reprendre votre lecture » ------------------------ */
+.tr-reprise {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "tag tag"
+    "titre pct"
+    "jauge jauge"
+    "auteur auteur";
+  gap: 4px 10px;
+  width: 100%;
+  text-align: left;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--trait);
+  border-radius: 12px;
+  background: var(--papier-2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.05s ease;
+}
+
+.tr-reprise:hover {
+  border-color: var(--accent);
+}
+
+.tr-reprise:active {
+  transform: translateY(1px);
+}
+
+.tr-reprise-tag {
+  grid-area: tag;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.tr-reprise-titre {
+  grid-area: titre;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 18px;
+  line-height: 1.2;
+  color: var(--encre);
+}
+
+.tr-reprise-auteur {
+  grid-area: auteur;
+  font-size: 12px;
+  color: var(--encre-2);
+}
+
+.tr-reprise-pct {
+  grid-area: pct;
+  align-self: center;
+  font-family: "Space Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--encre-2);
+}
+
+.tr-reprise-jauge {
+  grid-area: jauge;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--trait);
+  overflow: hidden;
+}
+
+.tr-reprise-jauge i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}

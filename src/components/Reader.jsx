@@ -130,10 +130,13 @@ function preparerContenu(contents) {
 /* ------------------------------------------------------------------ */
 /*  Lecteur                                                            */
 /* ------------------------------------------------------------------ */
-export default function Reader({ livre, onFermer }) {
+export default function Reader({ livre, onFermer, onProgress, onTermine }) {
   const viewerRef = useRef(null);
   const bookRef = useRef(null);
   const renditionRef = useRef(null);
+  const dernierPct = useRef(-1); // dernier % rapporté (throttle)
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
   const [etat, setEtat] = useState("chargement"); // chargement | ok | erreur
   const [incipit, setIncipit] = useState(livre.incipit || "");
   const [toc, setToc] = useState([]);
@@ -219,7 +222,18 @@ export default function Reader({ livre, onFermer }) {
           try {
             const idx = typeof loc.start.index === "number" ? loc.start.index : 0;
             if (totalSpine > 1) {
-              setProgress(Math.round((idx / (totalSpine - 1)) * 100));
+              const pct = Math.round((idx / (totalSpine - 1)) * 100);
+              setProgress(pct);
+              // Remonte la progression à l'app (historique / statut lu), en
+              // limitant les écritures : seulement quand le % bouge nettement
+              // ou atteint la fin.
+              if (
+                onProgressRef.current &&
+                (Math.abs(pct - dernierPct.current) >= 2 || pct >= 99)
+              ) {
+                dernierPct.current = pct;
+                onProgressRef.current(pct);
+              }
             }
           } catch (e) {
             /* ignore */
@@ -401,6 +415,15 @@ export default function Reader({ livre, onFermer }) {
               >
                 {ICONE_THEME[theme]}
               </button>
+              {onTermine ? (
+                <button
+                  onClick={onTermine}
+                  aria-label="Marquer ce livre comme terminé"
+                  title="J'ai terminé ce livre"
+                >
+                  ✓
+                </button>
+              ) : null}
             </div>
 
             <span className="tr-reader-pct">

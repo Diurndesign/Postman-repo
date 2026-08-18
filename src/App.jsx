@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { LIVRES } from "./data/livres.js";
 import {
   piocherPoolFr,
@@ -21,6 +21,12 @@ const CLE_BIBLIO = "tranche.biblio";
 const CLE_CADENCE = "tranche.cadence";
 const CLE_DUEL = "tranche.duel";
 const CLE_CATEGORIE = "tranche.categorie";
+// Statuts de lecture par livre : { [id]: { statut, progress, maj, livre } }.
+// statut ∈ "en-cours" | "lu". Sert à l'historique « Reprendre », aux pastilles
+// et à éviter de reproposer un déjà-vu (lu) dans le duel.
+const CLE_ETATS = "tranche.etats";
+// Seuil de progression (%) au-delà duquel un livre est considéré comme lu.
+const SEUIL_LU = 95;
 // Incrémenter invalide les duels mis en cache (nouveaux champs : résumé FR,
 // couverture Gutenberg…), pour qu'ils soient re-tirés avec les données à jour.
 const VERSION_DONNEES = 3;
@@ -166,6 +172,18 @@ function Couverture({ livre, petite }) {
       <span className="tr-couv-annee">{livre.annee || livre.epoque || ""}</span>
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Pastille d'état de lecture (lu / en cours)                         */
+/* ------------------------------------------------------------------ */
+function PastilleEtat({ etat }) {
+  if (!etat || !etat.statut) return null;
+  if (etat.statut === "lu") {
+    return <span className="tr-etat tr-etat-lu">✓ lu</span>;
+  }
+  const p = etat.progress || 0;
+  return <span className="tr-etat tr-etat-cours">en cours{p ? ` · ${p} %` : ""}</span>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -367,7 +385,7 @@ function Etoiles({ note, onNoter }) {
   );
 }
 
-function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
+function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire, statutDe, onBasculerLu }) {
   if (entrees.length === 0) {
     return (
       <div className="tr-vide">
@@ -384,6 +402,8 @@ function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
       {entrees.map((entree) => {
         const livre = entree.livre;
         if (!livre) return null;
+        const etat = statutDe ? statutDe(livre.id) : null;
+        const estLu = etat && etat.statut === "lu";
         return (
           <article className="tr-favori" key={livre.id}>
             <button
@@ -392,6 +412,11 @@ function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
               aria-label={`Lire ${livre.titre}`}
             >
               <Couverture livre={livre} petite />
+              {etat && etat.statut ? (
+                <span className="tr-item-pastille">
+                  <PastilleEtat etat={etat} />
+                </span>
+              ) : null}
             </button>
             <div className="tr-favori-corps">
               <h3 className="tr-favori-titre">{livre.titre}</h3>
@@ -418,7 +443,13 @@ function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
 
               <div className="tr-favori-actions">
                 <button className="tr-lien" onClick={() => onLire(livre)}>
-                  lire
+                  {estLu ? "relire" : "lire"}
+                </button>
+                <button
+                  className={"tr-lien" + (estLu ? " tr-lien-actif" : "")}
+                  onClick={() => onBasculerLu(livre)}
+                >
+                  {estLu ? "à relire" : "marquer lu"}
                 </button>
                 <button className="tr-lien" onClick={() => onCarnet(livre.id)}>
                   {entree.carnet ? "modifier la note" : "note"}
@@ -441,7 +472,7 @@ function Favoris({ entrees, onNoter, onCarnet, onRetirer, onLire }) {
 /* ------------------------------------------------------------------ */
 /*  Bibliothèque : parcourir tout le catalogue FR                      */
 /* ------------------------------------------------------------------ */
-function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
+function Catalogue({ estGarde, onGarder, onRetirer, onLire, statutDe }) {
   const [saisie, setSaisie] = useState("");
   const [requete, setRequete] = useState("");
   const [genre, setGenre] = useState("tout");
@@ -618,6 +649,7 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
           <div className="tr-grille">
             {livres.map((livre) => {
               const garde = estGarde(livre.id);
+              const etat = statutDe ? statutDe(livre.id) : null;
               return (
                 <div className="tr-item" key={livre.id}>
                   <button
@@ -626,6 +658,11 @@ function Catalogue({ estGarde, onGarder, onRetirer, onLire }) {
                     aria-label={`Lire ${livre.titre}`}
                   >
                     <Couverture livre={livre} petite />
+                    {etat && etat.statut ? (
+                      <span className="tr-item-pastille">
+                        <PastilleEtat etat={etat} />
+                      </span>
+                    ) : null}
                   </button>
                   <div className="tr-item-info">
                     <span className="tr-item-titre">{livre.titre}</span>
@@ -675,8 +712,10 @@ export default function App() {
   const [cadence, setCadence] = useState("jour");
   const [categorie, setCategorie] = useState("tout");
   const [biblio, setBiblio] = useState([]);
+  const [etats, setEtats] = useState({}); // statuts de lecture par livre
   const [pret, setPret] = useState(false); // hydratation terminée
   const [duel, setDuel] = useState([]);
+  const [duelNonce, setDuelNonce] = useState(0); // force un nouveau tirage
   const [statut, setStatut] = useState("chargement"); // chargement | ok | hors-ligne
   const [lecture, setLecture] = useState(null);
   const [carnetPour, setCarnetPour] = useState(null);
@@ -691,15 +730,18 @@ export default function App() {
     let annule = false;
     (async () => {
       await stockage.migrerVersNatif();
-      const [cad, catg, bib] = await Promise.all([
+      const [cad, catg, bib, ets] = await Promise.all([
         stockage.get(CLE_CADENCE),
         stockage.get(CLE_CATEGORIE),
         stockage.get(CLE_BIBLIO),
+        stockage.get(CLE_ETATS),
       ]);
       if (annule) return;
       setCadence(parseJSON(cad, "jour"));
       setCategorie(parseJSON(catg, "tout"));
       setBiblio(migrerBiblio(parseJSON(bib, [])));
+      const etatsBruts = parseJSON(ets, {});
+      setEtats(etatsBruts && typeof etatsBruts === "object" ? etatsBruts : {});
       setPret(true);
     })();
     return () => {
@@ -718,6 +760,16 @@ export default function App() {
   useEffect(() => {
     if (pret) stockage.set(CLE_CATEGORIE, JSON.stringify(categorie));
   }, [categorie, pret]);
+  useEffect(() => {
+    if (pret) stockage.set(CLE_ETATS, JSON.stringify(etats));
+  }, [etats, pret]);
+
+  // Refs à jour, lues par l'effet du duel SANS le relancer à chaque
+  // progression (sinon le duel se re-tirerait sans cesse pendant la lecture).
+  const etatsRef = useRef(etats);
+  etatsRef.current = etats;
+  const duelRef = useRef(duel);
+  duelRef.current = duel;
 
   // Duel de la période : réutilisé tant que la clé ne change pas,
   // sinon on pioche un nouveau pool dans la bibliothèque française.
@@ -739,8 +791,15 @@ export default function App() {
         Array.isArray(memo.livres) &&
         memo.livres.length >= 2 &&
         memo.livres.every((l) => l && (l.gutenbergId || l.epubUrl));
+      // Livres déjà lus : on ne les repropose pas dans le duel.
+      const lus = new Set(
+        Object.keys(etatsRef.current).filter(
+          (id) => etatsRef.current[id] && etatsRef.current[id].statut === "lu"
+        )
+      );
+      const memoSansLu = memoLisible && !memo.livres.some((l) => lus.has(l.id));
       if (
-        memoLisible &&
+        memoSansLu &&
         memo.v === VERSION_DONNEES &&
         memo.cle === cle &&
         memo.cadence === cadence &&
@@ -765,6 +824,12 @@ export default function App() {
       if (cat.genres) {
         const dans = pool.filter((l) => cat.genres.includes(l.genre));
         if (dans.length >= 2) pool = dans;
+      }
+
+      // Écarte les livres déjà lus (si ça laisse au moins une paire).
+      if (lus.size) {
+        const inedits = pool.filter((l) => !lus.has(l.id));
+        if (inedits.length >= 2) pool = inedits;
       }
 
       let horsLigne = false;
@@ -825,7 +890,9 @@ export default function App() {
       annule = true;
       ctrl.abort();
     };
-  }, [cadence, categorie, pret]);
+    // duelNonce : incrémenté quand un livre du duel courant devient « lu »,
+    // pour re-tirer une paire inédite immédiatement.
+  }, [cadence, categorie, pret, duelNonce]);
 
   function afficherToast(message) {
     setToast(message);
@@ -834,6 +901,89 @@ export default function App() {
   }
 
   const estGarde = (id) => biblio.some((e) => e.livre && e.livre.id === id);
+  const statutDe = (id) => etats[id] || null;
+
+  // Ouvre le lecteur ET consigne le livre dans l'historique (statut « en-cours »
+  // s'il n'est pas déjà lu), avec un instantané du livre pour pouvoir le rouvrir.
+  function ouvrirLivre(livre) {
+    setLecture(livre);
+    setEtats((e) => {
+      const prev = e[livre.id];
+      if (prev && prev.statut === "lu") {
+        return { ...e, [livre.id]: { ...prev, livre, maj: Date.now() } };
+      }
+      return {
+        ...e,
+        [livre.id]: {
+          statut: "en-cours",
+          progress: (prev && prev.progress) || 0,
+          maj: Date.now(),
+          livre,
+        },
+      };
+    });
+  }
+
+  // Progression rapportée par le lecteur : met à jour l'état, bascule en « lu »
+  // au-delà du seuil, et re-tire le duel si le livre terminé y figurait.
+  function majProgress(id, pct) {
+    setEtats((e) => {
+      const prev = e[id] || {};
+      const devientLu = pct >= SEUIL_LU || prev.statut === "lu";
+      return {
+        ...e,
+        [id]: {
+          ...prev,
+          progress: pct,
+          statut: devientLu ? "lu" : "en-cours",
+          maj: Date.now(),
+        },
+      };
+    });
+    if (pct >= SEUIL_LU && duelRef.current.some((l) => l && l.id === id)) {
+      setDuelNonce((n) => n + 1);
+    }
+  }
+
+  // Bascule manuelle lu / à relire depuis les favoris.
+  function basculerLu(livre) {
+    const id = livre.id;
+    const actuel = etats[id];
+    const versLu = !(actuel && actuel.statut === "lu");
+    setEtats((e) => {
+      const prev = e[id] || {};
+      return {
+        ...e,
+        [id]: {
+          ...prev,
+          livre: prev.livre || livre,
+          statut: versLu ? "lu" : "en-cours",
+          progress: versLu ? 100 : prev.progress || 0,
+          maj: Date.now(),
+        },
+      };
+    });
+    afficherToast(versLu ? "Marqué comme lu" : "Remis à relire");
+    if (versLu && duel.some((l) => l && l.id === id)) setDuelNonce((n) => n + 1);
+  }
+
+  // Reprise : dernier livre ouvert non terminé (pour la bannière Découverte).
+  const reprise = useMemo(() => {
+    let best = null;
+    for (const id of Object.keys(etats)) {
+      const s = etats[id];
+      if (
+        s &&
+        s.statut === "en-cours" &&
+        s.livre &&
+        (s.progress || 0) < SEUIL_LU &&
+        (s.progress || 0) > 0
+      ) {
+        if (!best || (s.maj || 0) > (best.maj || 0)) best = s;
+      }
+    }
+    return best;
+  }, [etats]);
 
   function garder(livre) {
     if (estGarde(livre.id)) return;
@@ -924,6 +1074,21 @@ export default function App() {
             className="tr-decouverte"
             style={{ display: vue === "decouverte" ? undefined : "none" }}
           >
+            {reprise ? (
+              <button
+                className="tr-reprise"
+                onClick={() => ouvrirLivre(reprise.livre)}
+              >
+                <span className="tr-reprise-tag">Reprendre votre lecture</span>
+                <span className="tr-reprise-titre">{reprise.livre.titre}</span>
+                <span className="tr-reprise-auteur">{reprise.livre.auteur}</span>
+                <span className="tr-reprise-jauge" aria-hidden="true">
+                  <i style={{ width: (reprise.progress || 0) + "%" }} />
+                </span>
+                <span className="tr-reprise-pct">{reprise.progress || 0} %</span>
+              </button>
+            ) : null}
+
             <p className="tr-phrase">
               Fais-moi découvrir un livre{" "}
               <select
@@ -969,7 +1134,7 @@ export default function App() {
                 livres={duel}
                 estGarde={estGarde}
                 onGarder={garder}
-                onLire={setLecture}
+                onLire={ouvrirLivre}
                 actif={vue === "decouverte" && !lecture && !carnetPour}
               />
             ) : (
@@ -987,7 +1152,8 @@ export default function App() {
               estGarde={estGarde}
               onGarder={garder}
               onRetirer={retirer}
-              onLire={setLecture}
+              onLire={ouvrirLivre}
+              statutDe={statutDe}
             />
           </section>
         )}
@@ -1002,7 +1168,9 @@ export default function App() {
               onNoter={noter}
               onCarnet={ouvrirCarnet}
               onRetirer={retirer}
-              onLire={setLecture}
+              onLire={ouvrirLivre}
+              statutDe={statutDe}
+              onBasculerLu={basculerLu}
             />
           </section>
         )}
@@ -1021,7 +1189,16 @@ export default function App() {
             </div>
           }
         >
-          <Reader livre={lecture} onFermer={() => setLecture(null)} />
+          <Reader
+            livre={lecture}
+            onFermer={() => setLecture(null)}
+            onProgress={(pct) => majProgress(lecture.id, pct)}
+            onTermine={() => {
+              majProgress(lecture.id, 100);
+              afficherToast("Livre terminé");
+              setLecture(null);
+            }}
+          />
         </Suspense>
       )}
 

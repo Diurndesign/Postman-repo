@@ -7,7 +7,11 @@
     },
     {
       "source": "/wsexport/:path*",
-      "destination": "https://ws-export.wmcloud.org/:path*"
+      "destination": "/api/wsexport"
+    },
+    {
+      "source": "/wsexport",
+      "destination": "/api/wsexport"
     }
   ]
 }
